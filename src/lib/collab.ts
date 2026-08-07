@@ -53,7 +53,7 @@ export function useCollabSession(opts: {
   const { sessionId, name } = opts;
   const clientId = useMemo(() => nanoid(8), []);
   const color = useMemo(
-    () => PRESENCE_COLORS[Math.abs(hash(clientId)) % PRESENCE_COLORS.length],
+    () => PRESENCE_COLORS[Math.abs(hash(clientId)) % PRESENCE_COLORS.length]!,
     [clientId],
   );
 
