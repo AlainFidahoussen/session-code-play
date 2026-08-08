@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: Cohort — Coding Interview Session API
+  version: "1.0.0"
+  description: |
+    Backend contract inferred from the frontend's service layer
+    (`frontend/src/services/types.ts` and its mock implementations under
+    `frontend/src/services/mock/`). The frontend currently talks to mocks only;
+    this document describes the real backend those mocks stand in for.
+
+    **Authentication:** none of these endpoints require authentication. There
+    are no accounts, logins, or API keys anywhere in the frontend (see
+    `docs/specs.md` §2 Non-Goals). The session ID itself acts as the sole
+    authorization token — anyone who has it can read and join that session
+    (`docs/specs.md` §8).
+
+    **Not covered by REST:** real-time document sync and presence (cursors,
+    participant list, live output sharing) happen over a separate WebSocket
+    channel, opened via `CollabApi.connect(sessionId)`
+    (`frontend/src/services/mock/collabApi.ts`). That interface passes
+    caller-defined messages as opaque payloads (`send(message: unknown)`), so
+    the frontend contract does not mandate a specific wire format — only that
+    a realtime channel exists per session. It is documented below as a single
+    path for completeness, since OpenAPI has no native WebSocket support.
+
+    Code execution (`frontend/src/lib/runner.ts`) runs entirely client-side in
+    a sandboxed Web Worker and never calls the backend, so it has no endpoint.
+security: []
+paths:
+  /api/sessions:
+    post:
+      operationId: createSession
+      summary: Create a new interview session
+      description: |
+        Mints a new session and its shareable link.
+        Maps to `SessionApi.createSession(title, language)`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionMeta"
+
+  /api/sessions/{id}:
+    get:
+      operationId: getSession
+      summary: Fetch session metadata
+      description: |
+        Used to validate an invite link before letting a participant join,
+        and to render the session header (title, language, expiry countdown).
+        Maps to `SessionApi.getSession(id)`, which resolves `null` when the
+        session is missing or past its TTL — represented here as `404`.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session exists and has not expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionMeta"
+        "404":
+          description: No session with this ID, or it has passed its TTL.
+
+  /api/sessions/{id}/touch:
+    post:
+      operationId: touchSession
+      summary: Mark a session as recently active, extending its TTL
+      description: |
+        Maps to `SessionApi.touchSession(id)`, called once on entering a
+        session and then every 30s while the workspace is open
+        (`frontend/src/components/SessionWorkspace.tsx`). The frontend
+        interface is synchronous and fire-and-forget — it does not read or
+        await a response body.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: Activity recorded; TTL extended.
+        "404":
+          description: No session with this ID, or it has passed its TTL.
+
+  /api/problems:
+    get:
+      operationId: listProblems
+      summary: List available interview problems
+      description: Maps to `ProblemsApi.listProblems()`.
+      responses:
+        "200":
+          description: All problems available for selection during a session.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Problem"
+
+  /sync/{sessionId}:
+    get:
+      operationId: connectRealtimeChannel
+      summary: Realtime sync channel (WebSocket upgrade)
+      description: |
+        Opens the bidirectional channel used for CRDT document sync and
+        ephemeral presence (`CollabApi.connect`), replacing the mock's
+        same-origin `BroadcastChannel` transport
+        (`frontend/src/services/mock/collabApi.ts`). Per `docs/specs.md` §3/§7
+        this is a `wss://` endpoint speaking the Yjs sync protocol; it is not
+        a standard request/response REST call, so only its existence and
+        location are documented here.
+      parameters:
+        - $ref: "#/components/parameters/SessionIdInPath"
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket handshake accepted.
+
+components:
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The session's ID, as minted by `POST /api/sessions`.
+    SessionIdInPath:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The session's ID, as minted by `POST /api/sessions`.
+
+  schemas:
+    CreateSessionRequest:
+      type: object
+      required:
+        - language
+      properties:
+        title:
+          type: string
+          description: Optional session label. Defaults to "Untitled interview" when omitted or blank.
+          example: "Backend · Ana R."
+        language:
+          type: string
+          description: |
+            Initial editor language, locked for the lifetime of the session.
+            Known ids (see `frontend/src/lib/languages.ts`): javascript,
+            typescript, python, java, cpp, go, sql, html, markdown, plaintext.
+          example: python
+
+    SessionMeta:
+      type: object
+      required:
+        - sessionId
+        - title
+        - language
+        - createdAt
+        - lastActive
+      properties:
+        sessionId:
+          type: string
+          example: k3f9-x7q2
+        title:
+          type: string
+          example: "Backend · Ana R."
+        language:
+          type: string
+          example: python
+        createdAt:
+          type: string
+          format: date-time
+        lastActive:
+          type: string
+          format: date-time
+
+    Difficulty:
+      type: string
+      enum: [easy, medium, hard]
+
+    Problem:
+      type: object
+      required:
+        - id
+        - title
+        - difficulty
+        - description
+        - starterCode
+      properties:
+        id:
+          type: string
+          example: two-sum
+        title:
+          type: string
+          example: Two Sum
+        difficulty:
+          $ref: "#/components/schemas/Difficulty"
+        description:
+          type: string
+          description: Problem statement, rendered as pre-wrapped plain text (Markdown-ish, not sanitized as HTML).
+        starterCode:
+          type: object
+          description: 'Starter code keyed by language id, e.g. `{ "python": "def solve():..." }`.'
+          additionalProperties:
+            type: string
