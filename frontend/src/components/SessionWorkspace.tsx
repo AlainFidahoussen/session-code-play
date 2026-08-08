@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Play, Square, Trash2, Copy, Check, Radio, Users, Clock } from "lucide-react";
+import { Play, Square, Trash2, Copy, Check, Radio, Users, Clock, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { CodeEditor } from "@/components/CodeEditor";
 import { useCollabSession, type BroadcastOutput } from "@/lib/collab";
 import { LANGUAGES, STARTERS, isRunnable, type LangId } from "@/lib/languages";
 import { runCode, type RunLine } from "@/lib/runner";
-import { sessionApi, type SessionMeta } from "@/services";
+import { sessionApi, problemsApi, type SessionMeta, type Problem } from "@/services";
 
 export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: string }) {
   const collab = useCollabSession({
@@ -23,17 +37,23 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
   const [clearOnRun, setClearOnRun] = useState(true);
   const [shareOutput, setShareOutput] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [problems, setProblems] = useState<Problem[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
   const outRef = useRef<HTMLDivElement>(null);
 
   const runnable = isRunnable(collab.language);
   const participants = [collab.self, ...collab.peers];
+  const selectedProblem = problems.find((p) => p.id === collab.problemId) ?? null;
 
   useEffect(() => {
     sessionApi.touchSession(meta.sessionId);
     const id = setInterval(() => sessionApi.touchSession(meta.sessionId), 30_000);
     return () => clearInterval(id);
   }, [meta.sessionId]);
+
+  useEffect(() => {
+    void problemsApi.listProblems().then(setProblems);
+  }, []);
 
   useEffect(() => {
     outRef.current?.scrollTo({ top: outRef.current.scrollHeight });
@@ -152,6 +172,42 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
           )}
         </div>
       </header>
+
+      <div className="border-b border-border bg-surface">
+        <div className="flex items-center gap-2 px-4 py-2">
+          <BookOpen className="size-3.5 text-muted-foreground" />
+          <Select value={collab.problemId ?? ""} onValueChange={(v) => collab.setProblemId(v)}>
+            <SelectTrigger className="h-8 w-[240px] bg-surface-2 font-mono text-xs">
+              <SelectValue placeholder="Select a problem…" />
+            </SelectTrigger>
+            <SelectContent>
+              {problems.map((p) => (
+                <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
+                  {p.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selectedProblem && (
+            <Badge variant="outline" className="font-mono text-[10px] capitalize">
+              {selectedProblem.difficulty}
+            </Badge>
+          )}
+        </div>
+
+        {selectedProblem && (
+          <Accordion type="single" collapsible defaultValue="statement" className="px-4">
+            <AccordionItem value="statement" className="border-none">
+              <AccordionTrigger className="py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                {selectedProblem.title}
+              </AccordionTrigger>
+              <AccordionContent className="whitespace-pre-wrap pb-3 text-sm text-foreground">
+                {selectedProblem.description}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        )}
+      </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1.6fr_1fr]">
         <section className="min-h-0 border-b border-border lg:border-b-0 lg:border-r">

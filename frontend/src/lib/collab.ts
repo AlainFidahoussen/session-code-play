@@ -29,20 +29,20 @@ export type BroadcastOutput = {
 };
 
 type Msg =
-  | { t: "doc"; from: string; code: string; language: string; rev: number }
+  | {
+      t: "doc";
+      from: string;
+      code: string;
+      language: string;
+      problemId: string | null;
+      rev: number;
+    }
   | { t: "request"; from: string }
   | { t: "presence"; from: string; p: Omit<Participant, "lastSeen"> }
   | { t: "leave"; from: string }
   | { t: "output"; from: string; payload: BroadcastOutput };
 
-export const PRESENCE_COLORS = [
-  "#4dd8e6",
-  "#f6c453",
-  "#7ee787",
-  "#ff8fab",
-  "#b39dff",
-  "#ffa26b",
-];
+export const PRESENCE_COLORS = ["#4dd8e6", "#f6c453", "#7ee787", "#ff8fab", "#b39dff", "#ffa26b"];
 
 export type ConnState = "connecting" | "connected" | "reconnecting";
 
@@ -61,6 +61,7 @@ export function useCollabSession(opts: {
 
   const [code, setCodeState] = useState(opts.initialCode);
   const [language, setLanguageState] = useState(opts.initialLanguage);
+  const [problemId, setProblemIdState] = useState<string | null>(null);
   const [peers, setPeers] = useState<Participant[]>([]);
   const [status, setStatus] = useState<ConnState>("connecting");
   const [remoteOutput, setRemoteOutput] = useState<BroadcastOutput | null>(null);
@@ -68,8 +69,12 @@ export function useCollabSession(opts: {
   const chan = useRef<RealtimeChannel | null>(null);
   const rev = useRef(0);
   const cursor = useRef<number | null>(null);
-  const state = useRef({ code: opts.initialCode, language: opts.initialLanguage });
-  state.current = { code, language };
+  const state = useRef({
+    code: opts.initialCode,
+    language: opts.initialLanguage,
+    problemId: null as string | null,
+  });
+  state.current = { code, language, problemId };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -84,6 +89,7 @@ export function useCollabSession(opts: {
           rev.current = m.rev;
           setCodeState(m.code);
           setLanguageState(m.language);
+          setProblemIdState(m.problemId);
         }
       } else if (m.t === "request") {
         c.send({
@@ -91,6 +97,7 @@ export function useCollabSession(opts: {
           from: clientId,
           code: state.current.code,
           language: state.current.language,
+          problemId: state.current.problemId,
           rev: rev.current,
         } satisfies Msg);
       } else if (m.t === "presence") {
@@ -133,16 +140,18 @@ export function useCollabSession(opts: {
   }, [sessionId, clientId, name, color]);
 
   const publish = useCallback(
-    (next: { code?: string; language?: string }) => {
+    (next: { code?: string; language?: string; problemId?: string | null }) => {
       rev.current += 1;
       const code = next.code ?? state.current.code;
       const language = next.language ?? state.current.language;
-      state.current = { code, language };
+      const problemId = next.problemId !== undefined ? next.problemId : state.current.problemId;
+      state.current = { code, language, problemId };
       chan.current?.send({
         t: "doc",
         from: clientId,
         code,
         language,
+        problemId,
         rev: rev.current,
       } satisfies Msg);
     },
@@ -161,6 +170,14 @@ export function useCollabSession(opts: {
     (next: string) => {
       setLanguageState(next);
       publish({ language: next });
+    },
+    [publish],
+  );
+
+  const setProblemId = useCallback(
+    (next: string | null) => {
+      setProblemIdState(next);
+      publish({ problemId: next });
     },
     [publish],
   );
@@ -188,8 +205,10 @@ export function useCollabSession(opts: {
     status,
     code,
     language,
+    problemId,
     setCode,
     setLanguage,
+    setProblemId,
     setCursor,
     broadcastOutput,
     remoteOutput,

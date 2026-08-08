@@ -5,8 +5,18 @@
  */
 import { mockSessionApi } from "./mock/sessionApi";
 import { mockCollabApi } from "./mock/collabApi";
+import { mockProblemsApi } from "./mock/problemsApi";
 
-export type { SessionMeta, SessionApi, CollabApi, RealtimeChannel } from "./types";
+export type {
+  SessionMeta,
+  SessionApi,
+  CollabApi,
+  RealtimeChannel,
+  Difficulty,
+  Problem,
+  ProblemsApi,
+} from "./types";
 
 export const sessionApi = mockSessionApi;
 export const collabApi = mockCollabApi;
+export const problemsApi = mockProblemsApi;

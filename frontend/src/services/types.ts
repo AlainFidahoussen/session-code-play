@@ -34,3 +34,19 @@ export interface CollabApi {
   /** Opens the realtime sync channel (doc updates + presence) for a session. */
   connect(sessionId: string): RealtimeChannel;
 }
+
+export type Difficulty = "easy" | "medium" | "hard";
+
+export type Problem = {
+  id: string;
+  title: string;
+  difficulty: Difficulty;
+  description: string;
+  /** Starter code per language id, e.g. `{ python: "def solve():..." }`. */
+  starterCode: Record<string, string>;
+};
+
+export interface ProblemsApi {
+  /** GET /api/problems */
+  listProblems(): Promise<Problem[]>;
+}
