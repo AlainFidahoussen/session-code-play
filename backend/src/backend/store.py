@@ -73,7 +73,17 @@ def _seed_problems() -> list[Problem]:
                 "Given an array of integers `nums` and an integer `target`, return the "
                 "indices of the two numbers that add up to `target`.\n\n"
                 "Assume exactly one solution exists, and the same element may not be used "
-                "twice."
+                "twice.\n\n"
+                "Example 1:\n"
+                "Input: nums = [2, 7, 11, 15], target = 9\n"
+                "Output: [0, 1]\n"
+                "Explanation: nums[0] + nums[1] == 9, so return [0, 1].\n\n"
+                "Example 2:\n"
+                "Input: nums = [3, 2, 4], target = 6\n"
+                "Output: [1, 2]\n\n"
+                "Example 3:\n"
+                "Input: nums = [3, 3], target = 6\n"
+                "Output: [0, 1]"
             ),
             functionName="two_sum",
             prototype="def two_sum(nums, target):\n    pass\n",
@@ -90,7 +100,21 @@ def _seed_problems() -> list[Problem]:
                 "Given a string `s` containing just the characters '(', ')', '{', '}', "
                 "'[' and ']', determine if the input string is valid.\n\n"
                 "Brackets must close in the correct order and every opening bracket must "
-                "have a matching closing bracket of the same type."
+                "have a matching closing bracket of the same type.\n\n"
+                "Example 1:\n"
+                "Input: s = \"()\"\n"
+                "Output: true\n\n"
+                "Example 2:\n"
+                "Input: s = \"()[]{}\"\n"
+                "Output: true\n\n"
+                "Example 3:\n"
+                "Input: s = \"(]\"\n"
+                "Output: false\n"
+                "Explanation: The '(' is closed by ']' instead of ')'.\n\n"
+                "Example 4:\n"
+                "Input: s = \"\"\n"
+                "Output: true\n"
+                "Explanation: An empty string has no unmatched brackets."
             ),
             functionName="is_valid",
             prototype="def is_valid(s):\n    pass\n",
@@ -106,7 +130,16 @@ def _seed_problems() -> list[Problem]:
             description=(
                 "Given an array of intervals where `intervals[i] = [start, end]`, merge "
                 "all overlapping intervals and return an array of the non-overlapping "
-                "intervals that cover all the intervals in the input."
+                "intervals that cover all the intervals in the input.\n\n"
+                "Example 1:\n"
+                "Input: intervals = [[1, 3], [2, 6], [8, 10], [15, 18]]\n"
+                "Output: [[1, 6], [8, 10], [15, 18]]\n"
+                "Explanation: [1, 3] and [2, 6] overlap, so they merge into [1, 6].\n\n"
+                "Example 2:\n"
+                "Input: intervals = [[1, 4], [4, 5]]\n"
+                "Output: [[1, 5]]\n"
+                "Explanation: Intervals [1, 4] and [4, 5] are considered overlapping "
+                "because they touch at 4."
             ),
             functionName="merge",
             prototype="def merge(intervals):\n    pass\n",
@@ -126,7 +159,19 @@ def _seed_problems() -> list[Problem]:
                 "return the number of words in the shortest transformation sequence from "
                 "`beginWord` to `endWord`, changing only one letter at a time with every "
                 "intermediate word present in `wordList`. Return 0 if no such sequence "
-                "exists."
+                "exists.\n\n"
+                "Example 1:\n"
+                "Input: beginWord = \"hit\", endWord = \"cog\", "
+                "wordList = [\"hot\", \"dot\", \"dog\", \"lot\", \"log\", \"cog\"]\n"
+                "Output: 5\n"
+                "Explanation: One shortest transformation sequence is "
+                "\"hit\" -> \"hot\" -> \"dot\" -> \"dog\" -> \"cog\", which has 5 words.\n\n"
+                "Example 2:\n"
+                "Input: beginWord = \"hit\", endWord = \"cog\", "
+                "wordList = [\"hot\", \"dot\", \"dog\", \"lot\", \"log\"]\n"
+                "Output: 0\n"
+                "Explanation: endWord \"cog\" is not in wordList, so no valid "
+                "transformation sequence exists."
             ),
             functionName="ladder_length",
             prototype="def ladder_length(begin_word, end_word, word_list):\n    pass\n",
