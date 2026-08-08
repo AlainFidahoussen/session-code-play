@@ -5,10 +5,12 @@ expiry. A real deployment would back this with Redis; this in-memory store is
 the process-local stand-in described in the OpenAPI spec.
 """
 
+from __future__ import annotations
+
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from backend.models import Difficulty, Problem, SessionMeta
+from backend.models import Difficulty, Problem, SessionMeta, TestCase
 
 SESSION_TTL = timedelta(hours=4)
 
@@ -73,11 +75,12 @@ def _seed_problems() -> list[Problem]:
                 "Assume exactly one solution exists, and the same element may not be used "
                 "twice."
             ),
-            starterCode={
-                "javascript": "function twoSum(nums, target) {\n  \n}\n",
-                "typescript": "function twoSum(nums: number[], target: number): number[] {\n  \n}\n",
-                "python": "def two_sum(nums, target):\n    pass\n",
-            },
+            functionName="two_sum",
+            prototype="def two_sum(nums, target):\n    pass\n",
+            visibleTests=[
+                TestCase(input=[[2, 7, 11, 15], 9], expected=[0, 1]),
+                TestCase(input=[[3, 2, 4], 6], expected=[1, 2]),
+            ],
         ),
         Problem(
             id="valid-parentheses",
@@ -89,11 +92,12 @@ def _seed_problems() -> list[Problem]:
                 "Brackets must close in the correct order and every opening bracket must "
                 "have a matching closing bracket of the same type."
             ),
-            starterCode={
-                "javascript": "function isValid(s) {\n  \n}\n",
-                "typescript": "function isValid(s: string): boolean {\n  \n}\n",
-                "python": "def is_valid(s):\n    pass\n",
-            },
+            functionName="is_valid",
+            prototype="def is_valid(s):\n    pass\n",
+            visibleTests=[
+                TestCase(input=["()"], expected=True),
+                TestCase(input=["()[]{}"], expected=True),
+            ],
         ),
         Problem(
             id="merge-intervals",
@@ -104,38 +108,14 @@ def _seed_problems() -> list[Problem]:
                 "all overlapping intervals and return an array of the non-overlapping "
                 "intervals that cover all the intervals in the input."
             ),
-            starterCode={
-                "javascript": "function merge(intervals) {\n  \n}\n",
-                "typescript": "function merge(intervals: number[][]): number[][] {\n  \n}\n",
-                "python": "def merge(intervals):\n    pass\n",
-            },
-        ),
-        Problem(
-            id="lru-cache",
-            title="LRU Cache",
-            difficulty=Difficulty.medium,
-            description=(
-                "Design a data structure that follows the Least Recently Used (LRU) "
-                "cache eviction policy.\n\n"
-                "Implement `get(key)` and `put(key, value)` so both operations run in "
-                "O(1) average time."
-            ),
-            starterCode={
-                "javascript": (
-                    "class LRUCache {\n  constructor(capacity) {\n    \n  }\n  "
-                    "get(key) {\n    \n  }\n  put(key, value) {\n    \n  }\n}\n"
+            functionName="merge",
+            prototype="def merge(intervals):\n    pass\n",
+            visibleTests=[
+                TestCase(
+                    input=[[[1, 3], [2, 6], [8, 10], [15, 18]]],
+                    expected=[[1, 6], [8, 10], [15, 18]],
                 ),
-                "typescript": (
-                    "class LRUCache {\n  constructor(capacity: number) {\n    \n  }\n  "
-                    "get(key: number): number {\n    return -1;\n  }\n  "
-                    "put(key: number, value: number): void {\n    \n  }\n}\n"
-                ),
-                "python": (
-                    "class LRUCache:\n    def __init__(self, capacity):\n        pass\n\n"
-                    "    def get(self, key):\n        pass\n\n"
-                    "    def put(self, key, value):\n        pass\n"
-                ),
-            },
+            ],
         ),
         Problem(
             id="word-ladder",
@@ -148,24 +128,58 @@ def _seed_problems() -> list[Problem]:
                 "intermediate word present in `wordList`. Return 0 if no such sequence "
                 "exists."
             ),
-            starterCode={
-                "javascript": "function ladderLength(beginWord, endWord, wordList) {\n  \n}\n",
-                "typescript": (
-                    "function ladderLength(beginWord: string, endWord: string, "
-                    "wordList: string[]): number {\n  \n}\n"
+            functionName="ladder_length",
+            prototype="def ladder_length(begin_word, end_word, word_list):\n    pass\n",
+            visibleTests=[
+                TestCase(
+                    input=["hit", "cog", ["hot", "dot", "dog", "lot", "log", "cog"]],
+                    expected=5,
                 ),
-                "python": "def ladder_length(begin_word, end_word, word_list):\n    pass\n",
-            },
+            ],
         ),
     ]
+
+
+# Never serialized in a Problem response — only used server-side by the
+# executor when grading a `/submit`, so candidates can't read them from the
+# network tab.
+_HIDDEN_TESTS: dict[str, list[TestCase]] = {
+    "two-sum": [
+        TestCase(input=[[3, 3], 6], expected=[0, 1]),
+        TestCase(input=[[1, 2, 3, 4, 5], 9], expected=[3, 4]),
+        TestCase(input=[[-3, 4, 3, 90], 0], expected=[0, 2]),
+    ],
+    "valid-parentheses": [
+        TestCase(input=["(]"], expected=False),
+        TestCase(input=["([)]"], expected=False),
+        TestCase(input=["{[]}"], expected=True),
+        TestCase(input=[""], expected=True),
+    ],
+    "merge-intervals": [
+        TestCase(input=[[[1, 4], [4, 5]]], expected=[[1, 5]]),
+        TestCase(input=[[[1, 4], [0, 4]]], expected=[[0, 4]]),
+        TestCase(input=[[[1, 4], [2, 3]]], expected=[[1, 4]]),
+    ],
+    "word-ladder": [
+        TestCase(input=["hit", "cog", ["hot", "dot", "dog", "lot", "log"]], expected=0),
+        TestCase(input=["a", "c", ["a", "b", "c"]], expected=3),
+    ],
+}
 
 
 class ProblemStore:
     def __init__(self) -> None:
         self._problems: list[Problem] = _seed_problems()
+        self._hidden_tests = _HIDDEN_TESTS
 
     def list(self) -> list[Problem]:
         return self._problems
+
+    def get(self, problem_id: str) -> Problem | None:
+        return next((p for p in self._problems if p.id == problem_id), None)
+
+    def hidden_tests(self, problem_id: str) -> list[TestCase]:
+        return self._hidden_tests.get(problem_id, [])
 
 
 session_store = SessionStore()

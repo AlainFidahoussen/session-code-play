@@ -23,8 +23,14 @@ info:
     a realtime channel exists per session. It is documented below as a single
     path for completeness, since OpenAPI has no native WebSocket support.
 
-    Code execution (`frontend/src/lib/runner.ts`) runs entirely client-side in
-    a sandboxed Web Worker and never calls the backend, so it has no endpoint.
+    **Code execution:** unlike the general-purpose editor, interview problems
+    are graded like LeetCode — a candidate's Python solution is checked
+    against a fixed set of visible test cases (`Run`) and, on `Submit`,
+    against visible *and* hidden test cases. Because hidden test cases must
+    never reach the browser, grading runs server-side in a sandboxed
+    subprocess (`backend/src/backend/executor.py`), not client-side — this
+    supersedes the "never runs on the server" decision in `docs/specs.md` §3
+    for the problem-grading path specifically.
 security: []
 paths:
   /api/sessions:
@@ -102,6 +108,63 @@ paths:
                 items:
                   $ref: "#/components/schemas/Problem"
 
+  /api/problems/{id}/run:
+    post:
+      operationId: runProblem
+      summary: Run a candidate's solution against a problem's visible test cases
+      description: |
+        Maps to `ProblemsApi.runTests(problemId, code)`. Executes server-side
+        in a sandboxed subprocess (`backend/src/backend/executor.py`) with a
+        timeout; the candidate's code and the visible test cases are the
+        only inputs, and per-test input/expected/actual values are returned
+        so the UI can show exactly what ran.
+      parameters:
+        - $ref: "#/components/parameters/ProblemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "200":
+          description: |
+            Grading finished (this does not imply the tests passed — check
+            `allPassed` / `error`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResponse"
+        "404":
+          description: No problem with this ID.
+
+  /api/problems/{id}/submit:
+    post:
+      operationId: submitProblem
+      summary: Run a candidate's solution against visible and hidden test cases
+      description: |
+        Maps to `ProblemsApi.submitTests(problemId, code)`. Like `run`, but
+        also grades against the problem's hidden test cases. Hidden test
+        results are redacted to pass/fail (+ error message) only — their
+        input and expected output are never included in the response.
+      parameters:
+        - $ref: "#/components/parameters/ProblemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "200":
+          description: Grading finished.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitResponse"
+        "404":
+          description: No problem with this ID.
+
   /sync/{sessionId}:
     get:
       operationId: connectRealtimeChannel
@@ -136,6 +199,13 @@ components:
       schema:
         type: string
       description: The session's ID, as minted by `POST /api/sessions`.
+    ProblemId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The problem's ID, as returned by `GET /api/problems`.
 
   schemas:
     CreateSessionRequest:
@@ -191,7 +261,9 @@ components:
         - title
         - difficulty
         - description
-        - starterCode
+        - functionName
+        - prototype
+        - visibleTests
       properties:
         id:
           type: string
@@ -204,8 +276,123 @@ components:
         description:
           type: string
           description: Problem statement, rendered as pre-wrapped plain text (Markdown-ish, not sanitized as HTML).
-        starterCode:
-          type: object
-          description: 'Starter code keyed by language id, e.g. `{ "python": "def solve():..." }`.'
-          additionalProperties:
-            type: string
+        functionName:
+          type: string
+          description: Name of the Python function a solution must define.
+          example: two_sum
+        prototype:
+          type: string
+          description: Starter code loaded into the editor when the problem is selected (Python only, for now).
+          example: "def two_sum(nums, target):\n    pass\n"
+        visibleTests:
+          type: array
+          description: Test cases shown to the candidate and used by `Run`. Hidden tests (used by `Submit`) are never exposed via this API.
+          items:
+            $ref: "#/components/schemas/TestCase"
+
+    TestCase:
+      type: object
+      required:
+        - input
+        - expected
+      properties:
+        input:
+          type: array
+          description: Positional arguments passed to the problem's function, e.g. `[[2, 7, 11, 15], 9]`.
+          items: {}
+        expected:
+          description: Expected return value, compared to the candidate's return value with `==`.
+
+    RunRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          description: Full Python source the candidate has written; must define `functionName`.
+
+    VisibleTestResult:
+      type: object
+      required:
+        - index
+        - passed
+        - input
+        - expected
+      properties:
+        index:
+          type: integer
+        passed:
+          type: boolean
+        input:
+          type: array
+          items: {}
+        expected: {}
+        actual:
+          description: The candidate function's return value for this test, if it ran without raising.
+        error:
+          type: string
+          nullable: true
+          description: Exception message if the candidate function raised instead of returning.
+        stdout:
+          type: string
+          description: Anything the candidate's function printed during this test call (truncated at 4000 chars), for debugging. Empty string if nothing was printed.
+
+    HiddenTestResult:
+      type: object
+      required:
+        - index
+        - passed
+      description: Same as VisibleTestResult but with input/expected/actual stripped out, so hidden test data never reaches the client.
+      properties:
+        index:
+          type: integer
+        passed:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+
+    RunResponse:
+      type: object
+      required:
+        - results
+        - allPassed
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisibleTestResult"
+        allPassed:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+          description: Set instead of `results` when the code couldn't be graded at all (syntax error, missing function, or timeout).
+
+    SubmitResponse:
+      type: object
+      required:
+        - visible
+        - hidden
+        - passedCount
+        - totalCount
+        - allPassed
+      properties:
+        visible:
+          type: array
+          items:
+            $ref: "#/components/schemas/VisibleTestResult"
+        hidden:
+          type: array
+          items:
+            $ref: "#/components/schemas/HiddenTestResult"
+        passedCount:
+          type: integer
+        totalCount:
+          type: integer
+        allPassed:
+          type: boolean
+        error:
+          type: string
+          nullable: true

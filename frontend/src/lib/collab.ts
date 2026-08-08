@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { collabApi } from "@/services";
-import type { RealtimeChannel } from "@/services";
+import type { RealtimeChannel, RunResult, SubmitResult } from "@/services";
 
 export type Participant = {
   clientId: string;
@@ -23,8 +23,8 @@ export type BroadcastOutput = {
   from: string;
   name: string;
   color: string;
-  lines: { stream: string; text: string }[];
-  ms: number;
+  kind: "run" | "submit";
+  result: RunResult | SubmitResult;
   at: number;
 };
 

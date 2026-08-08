@@ -1,11 +1,11 @@
 /**
  * Single entry point for every backend call the app makes. Components import
- * `sessionApi` / `collabApi` from here — never from `./mock` directly — so
- * swapping the mocks for a real HTTP/WebSocket backend only touches this file.
+ * `sessionApi` / `collabApi` from here — never from `./http` or `./mock`
+ * directly — so swapping implementations only touches this file.
  */
-import { mockSessionApi } from "./mock/sessionApi";
-import { mockCollabApi } from "./mock/collabApi";
-import { mockProblemsApi } from "./mock/problemsApi";
+import { httpSessionApi } from "./http/sessionApi";
+import { httpCollabApi } from "./http/collabApi";
+import { httpProblemsApi } from "./http/problemsApi";
 
 export type {
   SessionMeta,
@@ -13,10 +13,16 @@ export type {
   CollabApi,
   RealtimeChannel,
   Difficulty,
+  JsonValue,
+  TestCase,
   Problem,
+  VisibleTestResult,
+  HiddenTestResult,
+  RunResult,
+  SubmitResult,
   ProblemsApi,
 } from "./types";
 
-export const sessionApi = mockSessionApi;
-export const collabApi = mockCollabApi;
-export const problemsApi = mockProblemsApi;
+export const sessionApi = httpSessionApi;
+export const collabApi = httpCollabApi;
+export const problemsApi = httpProblemsApi;

@@ -18,7 +18,7 @@ To keep scope tight, the following are explicitly out of scope for v1 unless you
 - User authentication / persistent accounts
 - Video/audio calling (assume interviewer uses Zoom/Meet alongside)
 - Persistent storage of sessions beyond a TTL (e.g., 24–72h)
-- Server-side/native code execution (compiled languages like Java, C++, Go) — only browser-executable languages initially
+- Server-side/native code execution for the general-purpose editor (compiled languages like Java, C++, Go) — only browser-executable languages initially. **Exception:** problem grading (§5.4a) runs Python server-side by design, since hidden test cases can't be shipped to the browser.
 - Recording/playback of the session
 
 ---
@@ -41,7 +41,9 @@ To keep scope tight, the following are explicitly out of scope for v1 unless you
                                                          └──────────────┘
 ```
 
-**Key architectural decision:** code execution happens entirely client-side (sandboxed iframe/Web Worker/WASM), never on the server. This sidesteps the hardest and most dangerous part of "run arbitrary user code" (container escapes, resource exhaustion, network egress from a server) by never running untrusted code server-side at all.
+**Key architectural decision:** free-form code execution happens entirely client-side (sandboxed iframe/Web Worker/WASM), never on the server. This sidesteps the hardest and most dangerous part of "run arbitrary user code" (container escapes, resource exhaustion, network egress from a server) by never running untrusted code server-side at all.
+
+**Exception — problem grading (§5.4a):** LeetCode-style problems are graded against hidden test cases, which by definition must never reach the browser. That grading step runs the candidate's Python solution server-side, in an isolated subprocess with a hard timeout (`backend/src/backend/executor.py`). This is a deliberate, narrow reversal of the decision above, scoped to the grading endpoints only — the free-form editor execution path is unaffected. See §8 for the sandboxing tradeoffs this implies.
 
 ---
 
@@ -85,8 +87,34 @@ To keep scope tight, the following are explicitly out of scope for v1 unless you
 - Changing the language is itself a synced state (stored as a shared Yjs field, e.g., `ydoc.getMap('meta').get('language')`) so all participants see the same highlighting mode
 - Implemented via CodeMirror 6 language packages (`@codemirror/lang-javascript`, `@codemirror/lang-python`, etc.), loaded on demand to keep bundle size down
 
-### 5.4 In-Browser Code Execution ("Run" button)
-- Execution is **client-side only**, triggered locally by whichever user clicks "Run" — the *code* is synced via CRDT, but the *execution* and its output are local to that user's browser (with the option to broadcast output to others, see below)
+### 5.4a Problem Grading ("Run" / "Submit" buttons)
+A session starts with **no problem selected** — the editor is blank until the
+interviewer or candidate picks one from the problem list. Selecting a problem
+loads its description and Python function prototype (starter code) into the
+shared document; problem selection is itself synced state, like `language`.
+
+- **Run** grades the candidate's code against the problem's *visible* test
+  cases only. Per-test input, expected output, and actual output/error are
+  shown, so the candidate can debug.
+- **Submit** grades against visible *and* hidden test cases. Visible results
+  show the same detail as `Run`; hidden results are reduced to pass/fail
+  (+ error message) — their input and expected output are never sent to the
+  client, so they stay meaningfully hidden.
+- **Execution model:** unlike §5.4 below, grading is **server-side**, since
+  hidden tests can't be shipped to the browser without ceasing to be hidden.
+  The backend runs the candidate's function in an isolated subprocess with a
+  hard timeout (`backend/src/backend/executor.py`) — see §8 for what this
+  sandbox does and doesn't protect against.
+- **Language:** Python only for v1. The general multi-language editor (§5.3)
+  still exists for free-form use, but problems, prototypes, and grading are
+  Python-specific.
+- **Broadcasting results (optional, recommended):** after a run/submit, the
+  result can be sent as an ephemeral (non-persisted) awareness/broadcast
+  message so the interviewer sees the candidate's outcome too, without it
+  being part of the durable document.
+
+### 5.4 In-Browser Code Execution (general-purpose editor)
+- Execution is **client-side only**, triggered locally by whichever user runs the code — the *code* is synced via CRDT, but the *execution* and its output are local to that user's browser
 - **Sandboxing model:**
   - JS/TS: run inside a sandboxed `<iframe sandbox="allow-scripts">` with no `allow-same-origin`, so it cannot access the parent page, cookies, or localStorage; communicate via `postMessage`
   - Additionally run inside a Web Worker within that iframe for CPU isolation and the ability to terminate on infinite loops (`worker.terminate()` after a timeout, e.g., 5s)
@@ -94,12 +122,12 @@ To keep scope tight, the following are explicitly out of scope for v1 unless you
   - Console output (`console.log`, `print`, stdout/stderr) captured and piped back to the UI's output panel
 - **Resource limits:** execution timeout (default 5–10s), max output buffer size (e.g., 1MB, truncate beyond that) to prevent runaway output from freezing the UI
 - **No network access** from within the sandbox (enforced by CSP + iframe sandbox attributes) — prevents candidates' code from exfiltrating data or calling external APIs
-- **Broadcasting results (optional, recommended):** after local execution, the output can be sent as an ephemeral (non-persisted) awareness/broadcast message so the interviewer sees the candidate's run output too, without it being part of the durable document
+- Not currently wired into the UI (§9 removed the language selector in favor of the Python-only problem-grading flow above); kept here as the documented fallback if free-form multi-language execution comes back.
 
-### 5.5 Output/Console Panel
-- Split view: editor (left/top) + output console (right/bottom)
-- Output panel shows: stdout, stderr (styled differently, e.g., red), execution time, and a "Clear" button
-- Each "Run" clears previous output by default (toggleable)
+### 5.5 Results / Output Panel
+- Split view: editor (left/top) + results panel (right/bottom)
+- For problem grading: one row per test case (pass/fail badge, input/expected/actual for visible tests, pass/fail only for hidden tests), plus a summary count (`X / Y passed`)
+- Each "Run" or "Submit" replaces the previous results
 
 ---
 
@@ -131,6 +159,9 @@ session:{sessionId}:lastActive  → timestamp (for TTL extension)
 |---|---|---|
 | `/api/sessions` | `POST` | Create a new session, returns `{ sessionId, url }` |
 | `/api/sessions/:id` | `GET` | Validate session exists / not expired (for a friendly "link expired" page) |
+| `/api/problems` | `GET` | List problems (description, prototype, visible tests only — no hidden tests) |
+| `/api/problems/:id/run` | `POST` | Grade code against visible test cases |
+| `/api/problems/:id/submit` | `POST` | Grade code against visible + hidden test cases, server-side |
 | `wss://.../sync/:sessionId` | WebSocket | Yjs sync protocol (binary), handles document updates + awareness |
 
 ---
@@ -146,6 +177,8 @@ session:{sessionId}:lastActive  → timestamp (for TTL extension)
 | Data leakage after interview | TTL-based auto-expiry and deletion of both Redis keys and the Yjs doc from memory/storage |
 | Abuse (someone spamming session creation) | Rate-limit `/api/sessions` per IP |
 | Cross-tenant document access | `sessionId` acts as the sole authorization token — treat it as a secret; don't log full URLs server-side |
+| Malicious code in problem grading (`/run`, `/submit`) breaking out of the server process | Candidate code runs in its own OS subprocess (never in-process), with a hard timeout. **Current gap:** no container/seccomp/network isolation on the subprocess yet — a determined candidate could still read/write the local filesystem or reach the network from within it. Treat this as prototype-grade isolation; harden with a container (gVisor/Firecracker) or `resource`-based rlimits + network namespace before running untrusted code from strangers in production |
+| Hidden test cases leaking to the client | `/api/problems` and `/run` only ever serialize `visibleTests`; hidden tests live in a separate server-side-only store (`ProblemStore._hidden_tests`) and `/submit` strips input/expected/actual from hidden results before responding |
 
 ---
 
@@ -173,5 +206,6 @@ session:{sessionId}:lastActive  → timestamp (for TTL extension)
 
 - Should output be broadcast to all participants, or stay local to whoever clicked Run?
 - Do we need a read-only "observer" role for additional interviewers watching silently, or is fully-open editing acceptable long-term (spec currently says everyone can edit)?
-- Which languages must support **execution** (not just highlighting) at launch — just JS + Python, or more?
+- ~~Which languages must support **execution** (not just highlighting) at launch — just JS + Python, or more?~~ Resolved: Python only, via server-side problem grading (§5.4a). Other languages remain highlight-only until the general-purpose execution path (§5.4) is wired into the UI again.
 - Session TTL default — 4 hours? 24 hours? Configurable per session?
+- The problem-grading sandbox (§8) is process-isolation-only, with no container/network hardening — is that acceptable to ship, or does it block launch?

@@ -3,15 +3,7 @@ import { useState } from "react";
 import { Terminal, Users, Play, ShieldCheck, Link2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { sessionApi } from "@/services";
-import { LANGUAGES } from "@/lib/languages";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -38,13 +30,12 @@ export const Route = createFileRoute("/")({
 function Landing() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
-  const [language, setLanguage] = useState("python");
   const [joinUrl, setJoinUrl] = useState("");
   const [creating, setCreating] = useState(false);
 
   async function handleCreate() {
     setCreating(true);
-    const session = await sessionApi.createSession(title, language);
+    const session = await sessionApi.createSession(title, "python");
     void navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
   }
 
@@ -82,21 +73,6 @@ function Landing() {
             className="h-11 bg-surface font-mono text-sm"
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
-          <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger className="h-11 w-[150px] shrink-0 bg-surface font-mono text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((l) => (
-                <SelectItem key={l.id} value={l.id} className="font-mono text-xs">
-                  {l.label}
-                  {!l.runnable && (
-                    <span className="ml-2 text-muted-foreground">highlight only</span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button size="lg" className="h-11 shrink-0" onClick={handleCreate} disabled={creating}>
             {creating ? (
               <Loader2 className="size-4 animate-spin" />
@@ -129,8 +105,8 @@ function Landing() {
           />
           <Feature
             icon={<Play className="size-4 text-primary" />}
-            title="Run in-browser"
-            body="JavaScript, TypeScript and Python execute in a terminated-on-timeout worker."
+            title="Graded like LeetCode"
+            body="Pick a Python problem, Run against visible tests, Submit to grade against hidden ones too."
           />
           <Feature
             icon={<ShieldCheck className="size-4 text-primary" />}

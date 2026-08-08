@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Play, Square, Trash2, Copy, Check, Radio, Users, Clock, BookOpen } from "lucide-react";
+import { Play, Send, Trash2, Copy, Check, X, Radio, Users, Clock, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -19,31 +19,41 @@ import {
 } from "@/components/ui/accordion";
 import { CodeEditor } from "@/components/CodeEditor";
 import { useCollabSession, type BroadcastOutput } from "@/lib/collab";
-import { LANGUAGES, STARTERS, isRunnable, type LangId } from "@/lib/languages";
-import { runCode, type RunLine } from "@/lib/runner";
-import { sessionApi, problemsApi, type SessionMeta, type Problem } from "@/services";
+import { LANGUAGES, type LangId } from "@/lib/languages";
+import {
+  sessionApi,
+  problemsApi,
+  type SessionMeta,
+  type Problem,
+  type RunResult,
+  type SubmitResult,
+  type VisibleTestResult,
+  type HiddenTestResult,
+} from "@/services";
+
+const NO_PROBLEM_CODE = "# Select a problem above to get started.\n";
+
+type ResultState = { kind: "run"; result: RunResult } | { kind: "submit"; result: SubmitResult };
 
 export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: string }) {
   const collab = useCollabSession({
     sessionId: meta.sessionId,
     name,
-    initialCode: STARTERS[meta.language] ?? "",
+    initialCode: NO_PROBLEM_CODE,
     initialLanguage: meta.language,
   });
 
-  const [lines, setLines] = useState<RunLine[]>([]);
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState<number | null>(null);
-  const [clearOnRun, setClearOnRun] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [resultState, setResultState] = useState<ResultState | null>(null);
   const [shareOutput, setShareOutput] = useState(true);
   const [copied, setCopied] = useState(false);
   const [problems, setProblems] = useState<Problem[]>([]);
-  const cancelRef = useRef<(() => void) | null>(null);
   const outRef = useRef<HTMLDivElement>(null);
 
-  const runnable = isRunnable(collab.language);
   const participants = [collab.self, ...collab.peers];
   const selectedProblem = problems.find((p) => p.id === collab.problemId) ?? null;
+  const busy = running || submitting;
 
   useEffect(() => {
     sessionApi.touchSession(meta.sessionId);
@@ -57,44 +67,44 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
 
   useEffect(() => {
     outRef.current?.scrollTo({ top: outRef.current.scrollHeight });
-  }, [lines]);
+  }, [resultState]);
 
-  // Remote run results arriving over the ephemeral broadcast channel.
+  // Remote run/submit results arriving over the ephemeral broadcast channel.
   useEffect(() => {
     const r = collab.remoteOutput as BroadcastOutput | null;
     if (!r) return;
-    setLines([
-      { stream: "sys", text: `— ${r.name} ran the code (${r.ms}ms) —` },
-      ...(r.lines as RunLine[]),
-    ]);
-    setElapsed(r.ms);
+    setResultState({ kind: r.kind, result: r.result } as ResultState);
   }, [collab.remoteOutput]);
 
+  function handleSelectProblem(id: string) {
+    const problem = problems.find((p) => p.id === id);
+    collab.setProblemId(id);
+    if (problem) collab.setCode(problem.prototype);
+    setResultState(null);
+  }
+
   async function handleRun() {
-    if (running) return;
-    if (clearOnRun) setLines([]);
-    setElapsed(null);
+    if (!collab.problemId || busy) return;
     setRunning(true);
-    const collected: RunLine[] = [];
-    const { promise, cancel } = runCode(collab.language, collab.code, (line) => {
-      collected.push(line);
-      setLines((prev) => [...prev, line]);
-    });
-    cancelRef.current = cancel;
-    const result = await promise;
-    cancelRef.current = null;
-    setRunning(false);
-    setElapsed(result.ms);
-    if (shareOutput) {
-      collab.broadcastOutput({ lines: result.lines, ms: result.ms });
+    try {
+      const result = await problemsApi.runTests(collab.problemId, collab.code);
+      setResultState({ kind: "run", result });
+      if (shareOutput) collab.broadcastOutput({ kind: "run", result });
+    } finally {
+      setRunning(false);
     }
   }
 
-  function handleStop() {
-    cancelRef.current?.();
-    cancelRef.current = null;
-    setRunning(false);
-    setLines((prev) => [...prev, { stream: "err", text: "Execution stopped by user." }]);
+  async function handleSubmit() {
+    if (!collab.problemId || busy) return;
+    setSubmitting(true);
+    try {
+      const result = await problemsApi.submitTests(collab.problemId, collab.code);
+      setResultState({ kind: "submit", result });
+      if (shareOutput) collab.broadcastOutput({ kind: "submit", result });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function copyLink() {
@@ -104,6 +114,17 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
   }
 
   const expiry = useMemo(() => sessionApi.expiresAt(meta), [meta]);
+
+  const visibleResults: VisibleTestResult[] =
+    resultState?.kind === "run" ? resultState.result.results : (resultState?.result.visible ?? []);
+  const hiddenResults: HiddenTestResult[] =
+    resultState?.kind === "submit" ? resultState.result.hidden : [];
+  const passedCount =
+    resultState?.kind === "submit"
+      ? resultState.result.passedCount
+      : visibleResults.filter((r) => r.passed).length;
+  const totalCount =
+    resultState?.kind === "submit" ? resultState.result.totalCount : visibleResults.length;
 
   return (
     <div className="flex h-screen flex-col">
@@ -161,22 +182,24 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
             {copied ? "Copied" : "Invite"}
           </Button>
 
-          {running ? (
-            <Button size="sm" variant="destructive" onClick={handleStop}>
-              <Square className="size-3.5" /> Stop
-            </Button>
-          ) : (
-            <Button size="sm" onClick={handleRun} disabled={!runnable}>
-              <Play className="size-3.5" /> Run
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleRun}
+            disabled={!collab.problemId || busy}
+          >
+            <Play className="size-3.5" /> {running ? "Running…" : "Run"}
+          </Button>
+          <Button size="sm" onClick={handleSubmit} disabled={!collab.problemId || busy}>
+            <Send className="size-3.5" /> {submitting ? "Submitting…" : "Submit"}
+          </Button>
         </div>
       </header>
 
       <div className="border-b border-border bg-surface">
         <div className="flex items-center gap-2 px-4 py-2">
           <BookOpen className="size-3.5 text-muted-foreground" />
-          <Select value={collab.problemId ?? ""} onValueChange={(v) => collab.setProblemId(v)}>
+          <Select value={collab.problemId ?? ""} onValueChange={handleSelectProblem}>
             <SelectTrigger className="h-8 w-[240px] bg-surface-2 font-mono text-xs">
               <SelectValue placeholder="Select a problem…" />
             </SelectTrigger>
@@ -223,56 +246,112 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
         <section className="flex min-h-0 flex-col bg-surface">
           <div className="flex items-center gap-3 border-b border-border px-3 py-2">
             <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              Console
+              Results
             </span>
-            {elapsed != null && (
-              <span className="font-mono text-[11px] text-primary">{elapsed}ms</span>
+            {resultState && !resultState.result.error && (
+              <span
+                className={
+                  passedCount === totalCount
+                    ? "font-mono text-[11px] text-[color:var(--color-success)]"
+                    : "font-mono text-[11px] text-primary"
+                }
+              >
+                {passedCount} / {totalCount} passed
+              </span>
             )}
             <div className="ml-auto flex items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <Switch id="clear" checked={clearOnRun} onCheckedChange={setClearOnRun} />
-                <Label htmlFor="clear" className="font-mono text-[11px] text-muted-foreground">
-                  clear on run
-                </Label>
-              </div>
-              <div className="flex items-center gap-1.5">
                 <Switch id="share" checked={shareOutput} onCheckedChange={setShareOutput} />
                 <Label htmlFor="share" className="font-mono text-[11px] text-muted-foreground">
-                  share output
+                  share results
                 </Label>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setLines([])}>
+              <Button variant="ghost" size="sm" onClick={() => setResultState(null)}>
                 <Trash2 className="size-3.5" />
               </Button>
             </div>
           </div>
 
           <div ref={outRef} className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs">
-            {lines.length === 0 && (
+            {!collab.problemId && (
+              <p className="text-muted-foreground">Select a problem to run or submit code.</p>
+            )}
+            {collab.problemId && !resultState && !busy && (
               <p className="text-muted-foreground">
-                {runnable
-                  ? "Output appears here. Code runs in a sandboxed worker with no network access."
-                  : `${LANGUAGES.find((l) => l.id === collab.language)?.label} is highlighting-only — execution is disabled for compiled languages.`}
+                Run checks your code against the visible tests below. Submit also grades it against
+                hidden tests.
               </p>
             )}
-            {lines.map((l, i) => (
-              <pre
-                key={i}
-                className={
-                  l.stream === "err"
-                    ? "whitespace-pre-wrap text-[color:var(--color-destructive)]"
-                    : l.stream === "sys"
-                      ? "whitespace-pre-wrap text-muted-foreground"
-                      : "whitespace-pre-wrap text-foreground"
-                }
-              >
-                {l.text}
+            {resultState?.result.error && (
+              <pre className="whitespace-pre-wrap text-[color:var(--color-destructive)]">
+                {resultState.result.error}
               </pre>
-            ))}
-            {running && <p className="mt-1 animate-pulse text-muted-foreground">running…</p>}
+            )}
+            {resultState && !resultState.result.error && (
+              <div className="flex flex-col gap-2">
+                {visibleResults.map((r) => (
+                  <VisibleResultCard key={`v-${r.index}`} result={r} />
+                ))}
+                {hiddenResults.map((r) => (
+                  <HiddenResultCard key={`h-${r.index}`} result={r} />
+                ))}
+              </div>
+            )}
+            {busy && (
+              <p className="mt-2 animate-pulse text-muted-foreground">
+                {running ? "running…" : "submitting…"}
+              </p>
+            )}
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function VisibleResultCard({ result }: { result: VisibleTestResult }) {
+  return (
+    <div className="rounded-md border border-border p-2">
+      <div className="flex items-center gap-1.5">
+        {result.passed ? (
+          <Check className="size-3.5 text-[color:var(--color-success)]" />
+        ) : (
+          <X className="size-3.5 text-[color:var(--color-destructive)]" />
+        )}
+        <span className="font-semibold">Test {result.index + 1}</span>
+      </div>
+      <div className="mt-1 text-muted-foreground">input: {JSON.stringify(result.input)}</div>
+      <div className="text-muted-foreground">expected: {JSON.stringify(result.expected)}</div>
+      {result.error ? (
+        <div className="text-[color:var(--color-destructive)]">error: {result.error}</div>
+      ) : (
+        <div
+          className={result.passed ? "text-foreground" : "text-[color:var(--color-destructive)]"}
+        >
+          actual: {JSON.stringify(result.actual)}
+        </div>
+      )}
+      {result.stdout && (
+        <pre className="mt-1 whitespace-pre-wrap text-muted-foreground">
+          stdout: {result.stdout}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function HiddenResultCard({ result }: { result: HiddenTestResult }) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-md border border-border p-2">
+      {result.passed ? (
+        <Check className="size-3.5 text-[color:var(--color-success)]" />
+      ) : (
+        <X className="size-3.5 text-[color:var(--color-destructive)]" />
+      )}
+      <span className="font-semibold">Hidden test {result.index + 1}</span>
+      {result.error && (
+        <span className="text-[color:var(--color-destructive)]">— {result.error}</span>
+      )}
     </div>
   );
 }
