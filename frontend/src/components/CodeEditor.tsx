@@ -18,7 +18,6 @@ type Props = {
 export function CodeEditor({ value, language, peers, onChange, onCursor }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const loadedLang = useRef<LangId | null>(null);
   const onChangeRef = useRef(onChange);
   const onCursorRef = useRef(onCursor);
   onChangeRef.current = onChange;
@@ -60,8 +59,6 @@ export function CodeEditor({ value, language, peers, onChange, onCursor }: Props
 
   // Language packs load on demand and reconfigure the running editor.
   useEffect(() => {
-    if (loadedLang.current === language) return;
-    loadedLang.current = language;
     let cancelled = false;
     void loadLanguage(language).then((support) => {
       const v = view.current;

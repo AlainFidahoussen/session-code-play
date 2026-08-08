@@ -32,12 +32,15 @@ function write(meta: SessionMeta) {
 }
 
 /** POST /api/sessions */
-export async function createSession(title?: string): Promise<SessionMeta> {
+export async function createSession(
+  title: string | undefined,
+  language: string,
+): Promise<SessionMeta> {
   await latency();
   const meta: SessionMeta = {
     sessionId: `${nano()}-${nano()}`,
     title: title?.trim() || "Untitled interview",
-    language: "javascript",
+    language,
     createdAt: new Date().toISOString(),
     lastActive: new Date().toISOString(),
   };

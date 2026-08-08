@@ -1,13 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square, Trash2, Copy, Check, Radio, Users, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { CodeEditor } from "@/components/CodeEditor";
@@ -84,12 +77,6 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
     setLines((prev) => [...prev, { stream: "err", text: "Execution stopped by user." }]);
   }
 
-  function handleLanguage(next: string) {
-    collab.setLanguage(next);
-    const starter = STARTERS[next];
-    if (starter && collab.code.trim() === "") collab.setCode(starter);
-  }
-
   async function copyLink() {
     await navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -142,21 +129,12 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
             </div>
           </div>
 
-          <Select value={collab.language} onValueChange={handleLanguage}>
-            <SelectTrigger className="h-8 w-[150px] bg-surface-2 font-mono text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((l) => (
-                <SelectItem key={l.id} value={l.id} className="font-mono text-xs">
-                  {l.label}
-                  {!l.runnable && (
-                    <span className="ml-2 text-muted-foreground">highlight only</span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <span
+            className="flex h-8 w-[150px] items-center justify-center rounded-md border border-border bg-surface-2 font-mono text-xs text-muted-foreground"
+            title="Session language is fixed at creation"
+          >
+            {LANGUAGES.find((l) => l.id === collab.language)?.label ?? collab.language}
+          </span>
 
           <Button variant="secondary" size="sm" onClick={copyLink}>
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
