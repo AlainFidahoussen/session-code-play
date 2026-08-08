@@ -5,7 +5,7 @@ import { Loader2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SessionWorkspace } from "@/components/SessionWorkspace";
-import { getSession, type SessionMeta } from "@/lib/mock-api";
+import { sessionApi, type SessionMeta } from "@/services";
 
 export const Route = createFileRoute("/session/$sessionId")({
   head: () => ({
@@ -45,7 +45,7 @@ function SessionGate() {
 
   useEffect(() => {
     let alive = true;
-    void getSession(sessionId).then((m) => {
+    void sessionApi.getSession(sessionId).then((m) => {
       if (alive) setMeta(m ?? "expired");
     });
     return () => {

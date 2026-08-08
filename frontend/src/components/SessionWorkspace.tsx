@@ -7,7 +7,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { useCollabSession, type BroadcastOutput } from "@/lib/collab";
 import { LANGUAGES, STARTERS, isRunnable, type LangId } from "@/lib/languages";
 import { runCode, type RunLine } from "@/lib/runner";
-import { expiresAt, touchSession, type SessionMeta } from "@/lib/mock-api";
+import { sessionApi, type SessionMeta } from "@/services";
 
 export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: string }) {
   const collab = useCollabSession({
@@ -30,8 +30,8 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
   const participants = [collab.self, ...collab.peers];
 
   useEffect(() => {
-    touchSession(meta.sessionId);
-    const id = setInterval(() => touchSession(meta.sessionId), 30_000);
+    sessionApi.touchSession(meta.sessionId);
+    const id = setInterval(() => sessionApi.touchSession(meta.sessionId), 30_000);
     return () => clearInterval(id);
   }, [meta.sessionId]);
 
@@ -83,7 +83,7 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
     setTimeout(() => setCopied(false), 1600);
   }
 
-  const expiry = useMemo(() => expiresAt(meta), [meta]);
+  const expiry = useMemo(() => sessionApi.expiresAt(meta), [meta]);
 
   return (
     <div className="flex h-screen flex-col">

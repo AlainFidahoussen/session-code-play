@@ -1,13 +1,15 @@
 /**
- * Mocked realtime layer.
+ * Realtime collaboration hook.
  *
  * Stands in for Yjs + y-websocket: shared code text, shared `meta.language`,
- * and ephemeral awareness (name, colour, cursor). Transport is a
- * BroadcastChannel, so two browser tabs on the same session id genuinely sync
- * — swap the channel for a WebSocket provider when the relay exists.
+ * and ephemeral awareness (name, colour, cursor). The transport comes from
+ * `collabApi` (services layer) — swap the mock for a real WebSocket provider
+ * there when the relay exists, without touching this hook.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
+import { collabApi } from "@/services";
+import type { RealtimeChannel } from "@/services";
 
 export type Participant = {
   clientId: string;
@@ -63,7 +65,7 @@ export function useCollabSession(opts: {
   const [status, setStatus] = useState<ConnState>("connecting");
   const [remoteOutput, setRemoteOutput] = useState<BroadcastOutput | null>(null);
 
-  const chan = useRef<BroadcastChannel | null>(null);
+  const chan = useRef<RealtimeChannel | null>(null);
   const rev = useRef(0);
   const cursor = useRef<number | null>(null);
   const state = useRef({ code: opts.initialCode, language: opts.initialLanguage });
@@ -71,11 +73,11 @@ export function useCollabSession(opts: {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const c = new BroadcastChannel(`interview:${sessionId}`);
+    const c = collabApi.connect(sessionId);
     chan.current = c;
 
-    c.onmessage = (e: MessageEvent<Msg>) => {
-      const m = e.data;
+    c.onMessage((raw) => {
+      const m = raw as Msg;
       if (m.from === clientId) return;
       if (m.t === "doc") {
         if (m.rev >= rev.current) {
@@ -84,7 +86,7 @@ export function useCollabSession(opts: {
           setLanguageState(m.language);
         }
       } else if (m.t === "request") {
-        c.postMessage({
+        c.send({
           t: "doc",
           from: clientId,
           code: state.current.code,
@@ -101,12 +103,12 @@ export function useCollabSession(opts: {
       } else if (m.t === "output") {
         setRemoteOutput(m.payload);
       }
-    };
+    });
 
-    c.postMessage({ t: "request", from: clientId } satisfies Msg);
+    c.send({ t: "request", from: clientId } satisfies Msg);
 
     const heartbeat = setInterval(() => {
-      c.postMessage({
+      c.send({
         t: "presence",
         from: clientId,
         p: { clientId, name, color, cursor: cursor.current },
@@ -125,7 +127,7 @@ export function useCollabSession(opts: {
       clearTimeout(connectTimer);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("online", onOnline);
-      c.postMessage({ t: "leave", from: clientId } satisfies Msg);
+      c.send({ t: "leave", from: clientId } satisfies Msg);
       c.close();
     };
   }, [sessionId, clientId, name, color]);
@@ -136,7 +138,7 @@ export function useCollabSession(opts: {
       const code = next.code ?? state.current.code;
       const language = next.language ?? state.current.language;
       state.current = { code, language };
-      chan.current?.postMessage({
+      chan.current?.send({
         t: "doc",
         from: clientId,
         code,
@@ -169,7 +171,7 @@ export function useCollabSession(opts: {
 
   const broadcastOutput = useCallback(
     (payload: Omit<BroadcastOutput, "from" | "name" | "color" | "at">) => {
-      chan.current?.postMessage({
+      chan.current?.send({
         t: "output",
         from: clientId,
         payload: { ...payload, from: clientId, name, color, at: Date.now() },

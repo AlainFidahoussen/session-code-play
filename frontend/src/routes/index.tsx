@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createSession } from "@/lib/mock-api";
+import { sessionApi } from "@/services";
 import { LANGUAGES } from "@/lib/languages";
 
 export const Route = createFileRoute("/")({
@@ -44,7 +44,7 @@ function Landing() {
 
   async function handleCreate() {
     setCreating(true);
-    const session = await createSession(title, language);
+    const session = await sessionApi.createSession(title, language);
     void navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
   }
 
