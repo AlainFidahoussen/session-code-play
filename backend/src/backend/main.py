@@ -15,3 +15,8 @@ app.add_middleware(
 app.include_router(sessions.router)
 app.include_router(problems.router)
 app.include_router(sync.router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}

@@ -26,6 +26,10 @@ __pycache__
 *.pyc
 .pytest_cache
 
+# SQLite
+*.db
+*.db-journal
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

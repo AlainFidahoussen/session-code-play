@@ -2,7 +2,23 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from backend.store import SESSION_TTL, session_store
+from backend.db import SessionLocal
+from backend.db_models import SessionRecord
+from backend.store import SESSION_TTL
+
+
+def _set_last_active(session_id: str, last_active: datetime) -> None:
+    with SessionLocal() as db:
+        record = db.get(SessionRecord, session_id)
+        record.last_active = last_active
+        db.commit()
+
+
+def _get_last_active(session_id: str) -> datetime:
+    with SessionLocal() as db:
+        record = db.get(SessionRecord, session_id)
+        last_active = record.last_active
+        return last_active if last_active.tzinfo is not None else last_active.replace(tzinfo=timezone.utc)
 
 
 def test_create_session_returns_meta(client: TestClient) -> None:
@@ -48,8 +64,7 @@ def test_get_session_404_when_expired(client: TestClient) -> None:
     created = client.post("/api/sessions", json={"language": "python"}).json()
     session_id = created["sessionId"]
     expired_time = datetime.now(timezone.utc) - SESSION_TTL - timedelta(seconds=1)
-    stale = session_store._sessions[session_id].model_copy(update={"last_active": expired_time})
-    session_store._sessions[session_id] = stale
+    _set_last_active(session_id, expired_time)
 
     resp = client.get(f"/api/sessions/{session_id}")
 
@@ -60,14 +75,12 @@ def test_touch_session_extends_ttl(client: TestClient) -> None:
     created = client.post("/api/sessions", json={"language": "python"}).json()
     session_id = created["sessionId"]
     near_expiry = datetime.now(timezone.utc) - SESSION_TTL + timedelta(seconds=5)
-    session_store._sessions[session_id] = session_store._sessions[session_id].model_copy(
-        update={"last_active": near_expiry}
-    )
+    _set_last_active(session_id, near_expiry)
 
     resp = client.post(f"/api/sessions/{session_id}/touch")
 
     assert resp.status_code == 204
-    assert session_store._sessions[session_id].last_active > near_expiry
+    assert _get_last_active(session_id) > near_expiry
     assert client.get(f"/api/sessions/{session_id}").status_code == 200
 
 
