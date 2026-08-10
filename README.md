@@ -22,10 +22,12 @@ Or individually: `make backend`, `make frontend`. Run `make help` for all comman
 ## Docker
 
 ```bash
-docker compose up --build
+docker build -t session-code-play .
+docker run -p 8000:8000 -v $(pwd)/data:/app/data session-code-play
 ```
 
-Runs the backend on `:8000` and the frontend on `:3000`.
+Builds the frontend as static files and serves them from the backend on `:8000`. The
+`-v` bind mount persists the SQLite database (`data/cohort.db`) across container runs.
 
 ## Tests
 
