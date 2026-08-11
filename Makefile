@@ -1,4 +1,4 @@
-.PHONY: help install install-backend install-frontend install-test-e2e dev backend frontend test-e2e
+.PHONY: help install install-backend install-frontend install-test-e2e dev backend frontend backend-test frontend-test test-e2e
 
 help: ## Show this list of commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -22,6 +22,12 @@ frontend: ## Run the frontend dev server
 
 dev: ## Run backend and frontend dev servers together
 	$(MAKE) -j2 backend frontend
+
+backend-test: ## Run backend unit tests
+	cd backend && uv run pytest
+
+frontend-test: ## Run frontend unit tests
+	cd frontend && npm run test
 
 test-e2e: ## Run Playwright end-to-end tests against `docker compose up`
 	docker compose up -d --build

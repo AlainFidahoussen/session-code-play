@@ -32,7 +32,8 @@ Builds the frontend as static files and serves them from the backend on `:8000`.
 ## Tests
 
 ```bash
-cd backend && uv run pytest
+make backend-test   # pytest
+make frontend-test  # vitest
 ```
 
 ### End-to-end tests
