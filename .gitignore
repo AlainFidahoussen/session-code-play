@@ -20,6 +20,10 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Playwright
+tests_e2e/playwright-report/
+tests_e2e/test-results/
+
 # Python
 .venv
 __pycache__

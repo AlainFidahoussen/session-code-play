@@ -34,3 +34,22 @@ Builds the frontend as static files and serves them from the backend on `:8000`.
 ```bash
 cd backend && uv run pytest
 ```
+
+### End-to-end tests
+
+`tests_e2e/` runs Playwright against the app as served by `docker
+compose up` (frontend + backend + Postgres, the same stack used in
+production), simulating multiple users signing up and solving problems
+concurrently.
+
+```bash
+make test-e2e
+```
+
+Or manually: `docker compose up -d --build`, then `cd tests_e2e &&
+npm install && npx playwright test` (set `E2E_BASE_URL` to point at a
+different host/port).
+
+If Chromium fails to launch (missing system libraries), install its OS
+dependencies once with `sudo npx playwright install --with-deps chromium`
+inside `tests_e2e/`.
