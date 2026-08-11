@@ -5,8 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Design system — "Terminal Interview": deep ink surfaces, signal-cyan accent,
- * amber for live/presence states, JetBrains-ish mono for code chrome.
+ * Design system — "Terminal": deep ink surfaces, signal-cyan accent,
+ * JetBrains-ish mono for code chrome.
  */
 
 @theme inline {
@@ -115,22 +115,4 @@
 .cm-gutters {
   background: transparent !important;
   border-right: 1px solid var(--color-border) !important;
-}
-.remote-cursor {
-  position: relative;
-  border-left: 2px solid var(--cursor-color, var(--color-accent));
-  margin-left: -1px;
-}
-.remote-cursor::after {
-  content: attr(data-name);
-  position: absolute;
-  top: -1.15em;
-  left: -2px;
-  font-size: 10px;
-  line-height: 1.1;
-  padding: 1px 4px;
-  border-radius: 3px;
-  white-space: nowrap;
-  color: oklch(0.17 0.02 260);
-  background: var(--cursor-color, var(--color-accent));
 }

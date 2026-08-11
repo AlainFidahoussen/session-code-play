@@ -1,106 +1,32 @@
 openapi: 3.0.3
 info:
-  title: Cohort — Coding Interview Session API
+  title: Cohort — Coding Practice API
   version: "1.0.0"
   description: |
     Backend contract inferred from the frontend's service layer
-    (`frontend/src/services/types.ts` and its mock implementations under
-    `frontend/src/services/mock/`). The frontend currently talks to mocks only;
-    this document describes the real backend those mocks stand in for.
+    (`frontend/src/services/types.ts`).
 
-    **Authentication:** none of these endpoints require authentication. There
-    are no accounts, logins, or API keys anywhere in the frontend (see
-    `docs/specs.md` §2 Non-Goals). The session ID itself acts as the sole
-    authorization token — anyone who has it can read and join that session
-    (`docs/specs.md` §8).
+    **Authentication:** every endpoint except `/api/auth/signup` and
+    `/api/auth/login` requires an `Authorization: Bearer <token>` header,
+    issued by signup/login and invalidated by logout (`backend/src/backend/auth.py`).
+    Auth and saved-answer endpoints are not yet fully documented below — see
+    `backend/src/backend/routers/auth.py` and
+    `backend/src/backend/routers/answers.py` for their current shape.
 
-    **Not covered by REST:** real-time document sync and presence (cursors,
-    participant list, live output sharing) happen over a separate WebSocket
-    channel, opened via `CollabApi.connect(sessionId)`
-    (`frontend/src/services/mock/collabApi.ts`). That interface passes
-    caller-defined messages as opaque payloads (`send(message: unknown)`), so
-    the frontend contract does not mandate a specific wire format — only that
-    a realtime channel exists per session. It is documented below as a single
-    path for completeness, since OpenAPI has no native WebSocket support.
-
-    **Code execution:** unlike the general-purpose editor, interview problems
-    are graded like LeetCode — a candidate's Python solution is checked
-    against a fixed set of visible test cases (`Run`) and, on `Submit`,
-    against visible *and* hidden test cases. Because hidden test cases must
-    never reach the browser, grading runs server-side in a sandboxed
-    subprocess (`backend/src/backend/executor.py`), not client-side — this
-    supersedes the "never runs on the server" decision in `docs/specs.md` §3
-    for the problem-grading path specifically.
-security: []
+    **Code execution:** problems are graded like LeetCode — a user's Python
+    solution is checked against a fixed set of visible test cases (`Run`)
+    and, on `Submit`, against visible *and* hidden test cases. Because
+    hidden test cases must never reach the browser, grading runs server-side
+    in a sandboxed subprocess (`backend/src/backend/executor.py`).
 paths:
-  /api/sessions:
-    post:
-      operationId: createSession
-      summary: Create a new interview session
-      description: |
-        Mints a new session and its shareable link.
-        Maps to `SessionApi.createSession(title, language)`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateSessionRequest"
-      responses:
-        "201":
-          description: Session created.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionMeta"
-
-  /api/sessions/{id}:
-    get:
-      operationId: getSession
-      summary: Fetch session metadata
-      description: |
-        Used to validate an invite link before letting a participant join,
-        and to render the session header (title, language, expiry countdown).
-        Maps to `SessionApi.getSession(id)`, which resolves `null` when the
-        session is missing or past its TTL — represented here as `404`.
-      parameters:
-        - $ref: "#/components/parameters/SessionId"
-      responses:
-        "200":
-          description: Session exists and has not expired.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionMeta"
-        "404":
-          description: No session with this ID, or it has passed its TTL.
-
-  /api/sessions/{id}/touch:
-    post:
-      operationId: touchSession
-      summary: Mark a session as recently active, extending its TTL
-      description: |
-        Maps to `SessionApi.touchSession(id)`, called once on entering a
-        session and then every 30s while the workspace is open
-        (`frontend/src/components/SessionWorkspace.tsx`). The frontend
-        interface is synchronous and fire-and-forget — it does not read or
-        await a response body.
-      parameters:
-        - $ref: "#/components/parameters/SessionId"
-      responses:
-        "204":
-          description: Activity recorded; TTL extended.
-        "404":
-          description: No session with this ID, or it has passed its TTL.
-
   /api/problems:
     get:
       operationId: listProblems
-      summary: List available interview problems
+      summary: List available problems
       description: Maps to `ProblemsApi.listProblems()`.
       responses:
         "200":
-          description: All problems available for selection during a session.
+          description: All problems available for practice.
           content:
             application/json:
               schema:
@@ -111,11 +37,11 @@ paths:
   /api/problems/{id}/run:
     post:
       operationId: runProblem
-      summary: Run a candidate's solution against a problem's visible test cases
+      summary: Run a user's solution against a problem's visible test cases
       description: |
         Maps to `ProblemsApi.runTests(problemId, code)`. Executes server-side
         in a sandboxed subprocess (`backend/src/backend/executor.py`) with a
-        timeout; the candidate's code and the visible test cases are the
+        timeout; the user's code and the visible test cases are the
         only inputs, and per-test input/expected/actual values are returned
         so the UI can show exactly what ran.
       parameters:
@@ -141,7 +67,7 @@ paths:
   /api/problems/{id}/submit:
     post:
       operationId: submitProblem
-      summary: Run a candidate's solution against visible and hidden test cases
+      summary: Run a user's solution against visible and hidden test cases
       description: |
         Maps to `ProblemsApi.submitTests(problemId, code)`. Like `run`, but
         also grades against the problem's hidden test cases. Hidden test
@@ -165,40 +91,8 @@ paths:
         "404":
           description: No problem with this ID.
 
-  /sync/{sessionId}:
-    get:
-      operationId: connectRealtimeChannel
-      summary: Realtime sync channel (WebSocket upgrade)
-      description: |
-        Opens the bidirectional channel used for CRDT document sync and
-        ephemeral presence (`CollabApi.connect`), replacing the mock's
-        same-origin `BroadcastChannel` transport
-        (`frontend/src/services/mock/collabApi.ts`). Per `docs/specs.md` §3/§7
-        this is a `wss://` endpoint speaking the Yjs sync protocol; it is not
-        a standard request/response REST call, so only its existence and
-        location are documented here.
-      parameters:
-        - $ref: "#/components/parameters/SessionIdInPath"
-      responses:
-        "101":
-          description: Switching Protocols — WebSocket handshake accepted.
-
 components:
   parameters:
-    SessionId:
-      name: id
-      in: path
-      required: true
-      schema:
-        type: string
-      description: The session's ID, as minted by `POST /api/sessions`.
-    SessionIdInPath:
-      name: sessionId
-      in: path
-      required: true
-      schema:
-        type: string
-      description: The session's ID, as minted by `POST /api/sessions`.
     ProblemId:
       name: id
       in: path
@@ -208,48 +102,6 @@ components:
       description: The problem's ID, as returned by `GET /api/problems`.
 
   schemas:
-    CreateSessionRequest:
-      type: object
-      required:
-        - language
-      properties:
-        title:
-          type: string
-          description: Optional session label. Defaults to "Untitled interview" when omitted or blank.
-          example: "Backend · Ana R."
-        language:
-          type: string
-          description: |
-            Initial editor language, locked for the lifetime of the session.
-            Known ids (see `frontend/src/lib/languages.ts`): javascript,
-            typescript, python, java, cpp, go, sql, html, markdown, plaintext.
-          example: python
-
-    SessionMeta:
-      type: object
-      required:
-        - sessionId
-        - title
-        - language
-        - createdAt
-        - lastActive
-      properties:
-        sessionId:
-          type: string
-          example: k3f9-x7q2
-        title:
-          type: string
-          example: "Backend · Ana R."
-        language:
-          type: string
-          example: python
-        createdAt:
-          type: string
-          format: date-time
-        lastActive:
-          type: string
-          format: date-time
-
     Difficulty:
       type: string
       enum: [easy, medium, hard]
@@ -286,7 +138,7 @@ components:
           example: "def two_sum(nums, target):\n    pass\n"
         visibleTests:
           type: array
-          description: Test cases shown to the candidate and used by `Run`. Hidden tests (used by `Submit`) are never exposed via this API.
+          description: Test cases shown to the user and used by `Run`. Hidden tests (used by `Submit`) are never exposed via this API.
           items:
             $ref: "#/components/schemas/TestCase"
 
@@ -301,7 +153,7 @@ components:
           description: Positional arguments passed to the problem's function, e.g. `[[2, 7, 11, 15], 9]`.
           items: {}
         expected:
-          description: Expected return value, compared to the candidate's return value with `==`.
+          description: Expected return value, compared to the user's return value with `==`.
 
     RunRequest:
       type: object
@@ -310,7 +162,7 @@ components:
       properties:
         code:
           type: string
-          description: Full Python source the candidate has written; must define `functionName`.
+          description: Full Python source the user has written; must define `functionName`.
 
     VisibleTestResult:
       type: object
@@ -329,14 +181,14 @@ components:
           items: {}
         expected: {}
         actual:
-          description: The candidate function's return value for this test, if it ran without raising.
+          description: The user's function's return value for this test, if it ran without raising.
         error:
           type: string
           nullable: true
-          description: Exception message if the candidate function raised instead of returning.
+          description: Exception message if the user's function raised instead of returning.
         stdout:
           type: string
-          description: Anything the candidate's function printed during this test call (truncated at 4000 chars), for debugging. Empty string if nothing was printed.
+          description: Anything the user's function printed during this test call (truncated at 4000 chars), for debugging. Empty string if nothing was printed.
 
     HiddenTestResult:
       type: object

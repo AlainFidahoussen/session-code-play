@@ -5,34 +5,32 @@
  * touching any component.
  */
 
-export type SessionMeta = {
-  sessionId: string;
-  title: string;
-  language: string;
-  createdAt: string;
-  lastActive: string;
+export type AuthUser = {
+  username: string;
 };
 
-export interface SessionApi {
-  /** POST /api/sessions */
-  createSession(title: string | undefined, language: string): Promise<SessionMeta>;
-  /** GET /api/sessions/:id — resolves null when missing or past TTL. */
-  getSession(id: string): Promise<SessionMeta | null>;
-  /** Marks the session as recently active, extending its TTL. */
-  touchSession(id: string): void;
-  expiresAt(meta: SessionMeta): Date;
+export interface AuthApi {
+  /** POST /api/auth/signup — auto-issues a token, no separate login step needed. */
+  signup(username: string, password: string): Promise<AuthUser>;
+  /** POST /api/auth/login */
+  login(username: string, password: string): Promise<AuthUser>;
+  /** POST /api/auth/logout — invalidates the stored token. */
+  logout(): Promise<void>;
+  /** GET /api/auth/me — resolves null when there's no token or it's invalid/expired. */
+  me(): Promise<AuthUser | null>;
 }
 
-/** A bidirectional channel carrying opaque, caller-defined messages. */
-export interface RealtimeChannel {
-  send(message: unknown): void;
-  onMessage(handler: (message: unknown) => void): void;
-  close(): void;
-}
+export type ProblemAnswer = {
+  problemId: string;
+  code: string;
+  updatedAt: string;
+};
 
-export interface CollabApi {
-  /** Opens the realtime sync channel (doc updates + presence) for a session. */
-  connect(sessionId: string): RealtimeChannel;
+export interface AnswersApi {
+  /** GET /api/answers/:problemId — resolves null when nothing's been saved yet. */
+  getAnswer(problemId: string): Promise<ProblemAnswer | null>;
+  /** PUT /api/answers/:problemId — upserts the latest code for this user+problem. */
+  saveAnswer(problemId: string, code: string): Promise<ProblemAnswer>;
 }
 
 export type Difficulty = "easy" | "medium" | "hard";

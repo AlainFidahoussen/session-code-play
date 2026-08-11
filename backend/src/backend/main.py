@@ -5,9 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.routers import problems, sessions, sync
+from backend.routers import answers, auth, problems
 
-app = FastAPI(title="Cohort — Coding Interview Session API", version="1.0.0")
+app = FastAPI(title="Cohort — Coding Practice API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,9 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(sessions.router)
+app.include_router(auth.router)
 app.include_router(problems.router)
-app.include_router(sync.router)
+app.include_router(answers.router)
 
 
 @app.get("/health")
@@ -35,7 +35,7 @@ if FRONTEND_DIST_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     def serve_frontend(full_path: str) -> FileResponse:
-        if full_path == "health" or full_path.startswith(("api/", "sync/")):
+        if full_path == "health" or full_path.startswith("api/"):
             raise HTTPException(404, "Not Found")
         candidate = FRONTEND_DIST_DIR / full_path
         if candidate.is_file():

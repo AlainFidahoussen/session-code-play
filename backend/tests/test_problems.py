@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
 
-def test_list_problems_returns_seeded_problems(client: TestClient) -> None:
-    resp = client.get("/api/problems")
+def test_list_problems_returns_seeded_problems(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.get("/api/problems", headers=auth_headers)
 
     assert resp.status_code == 200
     problems = resp.json()
@@ -16,8 +16,8 @@ def test_list_problems_returns_seeded_problems(client: TestClient) -> None:
     assert "def two_sum" in two_sum["prototype"]
 
 
-def test_problem_shape_matches_schema(client: TestClient) -> None:
-    problems = client.get("/api/problems").json()
+def test_problem_shape_matches_schema(client: TestClient, auth_headers: dict[str, str]) -> None:
+    problems = client.get("/api/problems", headers=auth_headers).json()
 
     for problem in problems:
         assert problem["difficulty"] in {"easy", "medium", "hard"}
@@ -31,9 +31,15 @@ def test_problem_shape_matches_schema(client: TestClient) -> None:
             assert "expected" in test
 
 
-def test_problem_response_never_leaks_hidden_tests(client: TestClient) -> None:
-    problems = client.get("/api/problems").json()
+def test_problem_response_never_leaks_hidden_tests(client: TestClient, auth_headers: dict[str, str]) -> None:
+    problems = client.get("/api/problems", headers=auth_headers).json()
 
     for problem in problems:
         assert "hiddenTests" not in problem
         assert "hidden_tests" not in problem
+
+
+def test_list_problems_requires_auth(client: TestClient) -> None:
+    resp = client.get("/api/problems")
+
+    assert resp.status_code == 401

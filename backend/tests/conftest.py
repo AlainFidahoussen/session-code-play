@@ -24,3 +24,15 @@ def _reset_db() -> None:
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture
+def auth_token(client: TestClient) -> str:
+    resp = client.post("/api/auth/signup", json={"username": "tester", "password": "password123"})
+    assert resp.status_code == 201
+    return resp.json()["token"]
+
+
+@pytest.fixture
+def auth_headers(auth_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {auth_token}"}

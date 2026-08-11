@@ -1,17 +1,13 @@
 /**
  * Single entry point for every backend call the app makes. Components import
- * `sessionApi` / `collabApi` from here — never from `./http` or `./mock`
+ * `problemsApi` / `authApi` / `answersApi` from here — never from `./http`
  * directly — so swapping implementations only touches this file.
  */
-import { httpSessionApi } from "./http/sessionApi";
-import { httpCollabApi } from "./http/collabApi";
 import { httpProblemsApi } from "./http/problemsApi";
+import { httpAuthApi } from "./http/authApi";
+import { httpAnswersApi } from "./http/answersApi";
 
 export type {
-  SessionMeta,
-  SessionApi,
-  CollabApi,
-  RealtimeChannel,
   Difficulty,
   JsonValue,
   TestCase,
@@ -21,8 +17,12 @@ export type {
   RunResult,
   SubmitResult,
   ProblemsApi,
+  AuthUser,
+  AuthApi,
+  ProblemAnswer,
+  AnswersApi,
 } from "./types";
 
-export const sessionApi = httpSessionApi;
-export const collabApi = httpCollabApi;
 export const problemsApi = httpProblemsApi;
+export const authApi = httpAuthApi;
+export const answersApi = httpAnswersApi;

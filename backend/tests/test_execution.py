@@ -30,8 +30,10 @@ PRINTING_TWO_SUM = (
 )
 
 
-def test_run_with_correct_solution_passes_visible_tests(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/run", json={"code": CORRECT_TWO_SUM})
+def test_run_with_correct_solution_passes_visible_tests(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post("/api/problems/two-sum/run", json={"code": CORRECT_TWO_SUM}, headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -43,8 +45,10 @@ def test_run_with_correct_solution_passes_visible_tests(client: TestClient) -> N
         assert result["actual"] == result["expected"]
 
 
-def test_run_captures_print_output_for_debugging(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/run", json={"code": PRINTING_TWO_SUM})
+def test_run_captures_print_output_for_debugging(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post("/api/problems/two-sum/run", json={"code": PRINTING_TWO_SUM}, headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -52,8 +56,12 @@ def test_run_captures_print_output_for_debugging(client: TestClient) -> None:
         assert "debugging" in result["stdout"]
 
 
-def test_submit_never_leaks_stdout_for_hidden_tests(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/submit", json={"code": PRINTING_TWO_SUM})
+def test_submit_never_leaks_stdout_for_hidden_tests(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post(
+        "/api/problems/two-sum/submit", json={"code": PRINTING_TWO_SUM}, headers=auth_headers
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -63,8 +71,10 @@ def test_submit_never_leaks_stdout_for_hidden_tests(client: TestClient) -> None:
         assert "debugging" in visible_result["stdout"]
 
 
-def test_run_with_wrong_solution_reports_failures(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/run", json={"code": WRONG_TWO_SUM})
+def test_run_with_wrong_solution_reports_failures(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post("/api/problems/two-sum/run", json={"code": WRONG_TWO_SUM}, headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -72,8 +82,10 @@ def test_run_with_wrong_solution_reports_failures(client: TestClient) -> None:
     assert any(not r["passed"] for r in body["results"])
 
 
-def test_run_with_syntax_error_returns_error_not_500(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/run", json={"code": SYNTAX_ERROR_CODE})
+def test_run_with_syntax_error_returns_error_not_500(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post("/api/problems/two-sum/run", json={"code": SYNTAX_ERROR_CODE}, headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -82,14 +94,20 @@ def test_run_with_syntax_error_returns_error_not_500(client: TestClient) -> None
     assert "SyntaxError" in body["error"]
 
 
-def test_run_unknown_problem_returns_404(client: TestClient) -> None:
-    resp = client.post("/api/problems/does-not-exist/run", json={"code": CORRECT_TWO_SUM})
+def test_run_unknown_problem_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.post(
+        "/api/problems/does-not-exist/run", json={"code": CORRECT_TWO_SUM}, headers=auth_headers
+    )
 
     assert resp.status_code == 404
 
 
-def test_submit_grades_hidden_tests_without_leaking_their_data(client: TestClient) -> None:
-    resp = client.post("/api/problems/two-sum/submit", json={"code": CORRECT_TWO_SUM})
+def test_submit_grades_hidden_tests_without_leaking_their_data(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post(
+        "/api/problems/two-sum/submit", json={"code": CORRECT_TWO_SUM}, headers=auth_headers
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -105,8 +123,10 @@ def test_submit_grades_hidden_tests_without_leaking_their_data(client: TestClien
         assert "actual" not in hidden_result
 
 
-def test_submit_unknown_problem_returns_404(client: TestClient) -> None:
-    resp = client.post("/api/problems/does-not-exist/submit", json={"code": CORRECT_TWO_SUM})
+def test_submit_unknown_problem_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.post(
+        "/api/problems/does-not-exist/submit", json={"code": CORRECT_TWO_SUM}, headers=auth_headers
+    )
 
     assert resp.status_code == 404
 

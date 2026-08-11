@@ -8,21 +8,6 @@ from pydantic import BaseModel, Field
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 
 
-class CreateSessionRequest(BaseModel):
-    title: str | None = None
-    language: str
-
-
-class SessionMeta(BaseModel):
-    session_id: str = Field(alias="sessionId")
-    title: str
-    language: str
-    created_at: datetime = Field(alias="createdAt")
-    last_active: datetime = Field(alias="lastActive")
-
-    model_config = {"populate_by_name": True}
-
-
 class Difficulty(str, Enum):
     easy = "easy"
     medium = "medium"
@@ -46,6 +31,33 @@ class Problem(BaseModel):
     visible_tests: list[TestCase] = Field(alias="visibleTests")
 
     model_config = {"populate_by_name": True}
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=72)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    username: str
+
+
+class ProblemAnswer(BaseModel):
+    problem_id: str = Field(alias="problemId")
+    code: str
+    updated_at: datetime = Field(alias="updatedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class SaveAnswerRequest(BaseModel):
+    code: str
 
 
 class RunRequest(BaseModel):

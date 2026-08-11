@@ -5,11 +5,12 @@
  */
 import type { Problem, ProblemsApi, RunResult, SubmitResult } from "../types";
 import { API_BASE_URL } from "./config";
+import { authHeaders } from "./token";
 
 async function postCode<T>(path: string, code: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ code }),
   });
   if (!res.ok) {
@@ -21,7 +22,7 @@ async function postCode<T>(path: string, code: string): Promise<T> {
 
 export const httpProblemsApi: ProblemsApi = {
   async listProblems() {
-    const res = await fetch(`${API_BASE_URL}/api/problems`);
+    const res = await fetch(`${API_BASE_URL}/api/problems`, { headers: authHeaders() });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`listProblems failed: ${res.status} ${res.statusText} — ${body}`);

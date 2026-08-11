@@ -1,9 +1,9 @@
 # Session Code Play
 
-An online coding interview platform: create a shareable session, and grade a
-candidate's Python solutions server-side (Run against visible tests, Submit
-against visible + hidden tests). See [docs/specs.md](docs/specs.md) for the
-full technical spec.
+A coding practice app: sign in, pick a problem, and grade your Python
+solutions server-side (Run against visible tests, Submit against visible +
+hidden tests). Your code is saved to your account per problem. See
+[docs/specs.md](docs/specs.md) for the full technical spec.
 
 ## Stack
 

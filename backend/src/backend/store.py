@@ -1,7 +1,6 @@
-"""Session and problem storage, backed by a SQL database via SQLAlchemy.
+"""Problem, user, and answer storage, backed by a SQL database via SQLAlchemy.
 
-Sessions remain ephemeral per `docs/specs.md` §2 (TTL-based expiry), but are
-now persisted through `backend.db` instead of an in-process dict, so state
+Persisted through `backend.db` instead of an in-process dict, so state
 survives process restarts. The database backend is configurable via the
 `DATABASE_URL` environment variable — SQLite by default, with Postgres (or
 any other SQLAlchemy-supported database) a drop-in swap.
@@ -10,17 +9,19 @@ any other SQLAlchemy-supported database) a drop-in swap.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
+import bcrypt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal, init_db
-from backend.db_models import ProblemRecord, SessionRecord
-from backend.models import Difficulty, Problem, SessionMeta, TestCase
+from backend.db_models import AuthTokenRecord, ProblemAnswerRecord, ProblemRecord, UserRecord
+from backend.models import Difficulty, Problem, ProblemAnswer, TestCase
 
-SESSION_TTL = timedelta(hours=4)
-
-# Matches the frontend mock's alphabet (excludes ambiguous chars: l, o, 0, 1).
+# Matches the alphabet used for user ids (excludes ambiguous chars: l, o, 0, 1).
 _ID_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"
 
 
@@ -34,59 +35,6 @@ def _generate_id() -> str:
 def _as_utc(dt: datetime) -> datetime:
     """SQLite drops tzinfo on round-trip; every stored datetime is UTC."""
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-
-
-def _to_meta(record: SessionRecord) -> SessionMeta:
-    return SessionMeta(
-        sessionId=record.session_id,
-        title=record.title,
-        language=record.language,
-        createdAt=_as_utc(record.created_at),
-        lastActive=_as_utc(record.last_active),
-    )
-
-
-class SessionStore:
-    def create(self, title: str | None, language: str) -> SessionMeta:
-        now = datetime.now(timezone.utc)
-        record = SessionRecord(
-            session_id=_generate_id(),
-            title=title.strip() if title and title.strip() else "Untitled interview",
-            language=language,
-            created_at=now,
-            last_active=now,
-        )
-        with SessionLocal() as db:
-            db.add(record)
-            db.commit()
-            return _to_meta(record)
-
-    def get(self, session_id: str) -> SessionMeta | None:
-        with SessionLocal() as db:
-            record = db.get(SessionRecord, session_id)
-            if record is None:
-                return None
-            if self._is_expired(record):
-                db.delete(record)
-                db.commit()
-                return None
-            return _to_meta(record)
-
-    def touch(self, session_id: str) -> bool:
-        with SessionLocal() as db:
-            record = db.get(SessionRecord, session_id)
-            if record is None or self._is_expired(record):
-                if record is not None:
-                    db.delete(record)
-                    db.commit()
-                return False
-            record.last_active = datetime.now(timezone.utc)
-            db.commit()
-            return True
-
-    @staticmethod
-    def _is_expired(record: SessionRecord) -> bool:
-        return datetime.now(timezone.utc) - _as_utc(record.last_active) > SESSION_TTL
 
 
 def _seed_problems() -> list[Problem]:
@@ -897,8 +845,119 @@ def _ensure_problems_seeded() -> None:
         db.commit()
 
 
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def _generate_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+@dataclass
+class AuthenticatedUser:
+    user_id: str
+    username: str
+    token: str
+
+
+class UsernameTakenError(Exception):
+    pass
+
+
+class InvalidCredentialsError(Exception):
+    pass
+
+
+class UserStore:
+    def signup(self, username: str, password: str) -> AuthenticatedUser:
+        username = username.strip()
+        user = UserRecord(
+            id=_generate_id(),
+            username=username,
+            password_hash=_hash_password(password),
+            created_at=datetime.now(timezone.utc),
+        )
+        with SessionLocal() as db:
+            db.add(user)
+            try:
+                db.flush()
+            except IntegrityError as exc:
+                raise UsernameTakenError(username) from exc
+            token = self._issue_token(db, user.id)
+            db.commit()
+            return AuthenticatedUser(user_id=user.id, username=user.username, token=token.token)
+
+    def login(self, username: str, password: str) -> AuthenticatedUser:
+        with SessionLocal() as db:
+            user = db.scalar(select(UserRecord).where(UserRecord.username == username.strip()))
+            if user is None or not _verify_password(password, user.password_hash):
+                raise InvalidCredentialsError()
+            token = self._issue_token(db, user.id)
+            db.commit()
+            return AuthenticatedUser(user_id=user.id, username=user.username, token=token.token)
+
+    def _issue_token(self, db: Session, user_id: str) -> AuthTokenRecord:
+        token = AuthTokenRecord(
+            token=_generate_token(), user_id=user_id, created_at=datetime.now(timezone.utc)
+        )
+        db.add(token)
+        return token
+
+    def get_by_token(self, token: str) -> AuthenticatedUser | None:
+        with SessionLocal() as db:
+            token_record = db.get(AuthTokenRecord, token)
+            if token_record is None:
+                return None
+            user = db.get(UserRecord, token_record.user_id)
+            if user is None:
+                return None
+            return AuthenticatedUser(user_id=user.id, username=user.username, token=token)
+
+    def logout(self, token: str) -> None:
+        with SessionLocal() as db:
+            record = db.get(AuthTokenRecord, token)
+            if record is not None:
+                db.delete(record)
+                db.commit()
+
+
+def _to_answer(record: ProblemAnswerRecord) -> ProblemAnswer:
+    return ProblemAnswer(
+        problemId=record.problem_id,
+        code=record.code,
+        updatedAt=_as_utc(record.updated_at),
+    )
+
+
+class AnswerStore:
+    def get(self, user_id: str, problem_id: str) -> ProblemAnswer | None:
+        with SessionLocal() as db:
+            record = db.get(ProblemAnswerRecord, (user_id, problem_id))
+            return _to_answer(record) if record is not None else None
+
+    def save(self, user_id: str, problem_id: str, code: str) -> ProblemAnswer:
+        now = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            record = db.get(ProblemAnswerRecord, (user_id, problem_id))
+            if record is None:
+                record = ProblemAnswerRecord(
+                    user_id=user_id, problem_id=problem_id, code=code, updated_at=now
+                )
+                db.add(record)
+            else:
+                record.code = code
+                record.updated_at = now
+            db.commit()
+            return _to_answer(record)
+
+
 init_db()
 _ensure_problems_seeded()
 
-session_store = SessionStore()
 problem_store = ProblemStore()
+user_store = UserStore()
+answer_store = AnswerStore()

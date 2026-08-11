@@ -4,13 +4,16 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  ClientOnly,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthGate } from "../lib/auth";
 
 function NotFoundComponent() {
   return (
@@ -119,8 +122,18 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <ClientOnly
+        fallback={
+          <div className="flex min-h-screen items-center justify-center">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        }
+      >
+        <AuthGate>
+          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+          <Outlet />
+        </AuthGate>
+      </ClientOnly>
     </QueryClientProvider>
   );
 }

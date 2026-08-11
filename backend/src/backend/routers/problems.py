@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from backend.auth import get_current_user
 from backend.executor import ExecutionError, run_tests
 from backend.models import (
     HiddenTestResult,
@@ -11,7 +12,7 @@ from backend.models import (
 )
 from backend.store import problem_store
 
-router = APIRouter(prefix="/api/problems", tags=["problems"])
+router = APIRouter(prefix="/api/problems", tags=["problems"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("", response_model=list[Problem], response_model_by_alias=True)

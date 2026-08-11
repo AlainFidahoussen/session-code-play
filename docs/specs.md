@@ -1,168 +1,147 @@
-# Online Coding Interview Platform — Technical Specification
+# Coding Practice Platform — Technical Specification
 
 ## 1. Overview
 
-A web application that lets an interviewer create a shareable session link, invite a candidate to join, and collaboratively edit and run code in real time, with no account required for candidates and no server-side code execution risk.
+A web application for practicing coding problems, LeetCode-style: a user
+signs in, picks a problem, writes a Python solution, runs it against visible
+test cases, and submits it for grading against visible + hidden test cases.
+Each user's most recent code per problem is saved to their account.
 
 **Core capabilities**
-- Create a session and get a shareable link (no signup required to join)
-- Real-time collaborative code editing (multi-cursor, everyone can edit)
-- Syntax highlighting for multiple languages
-- In-browser code execution (sandboxed, no backend execution)
+- User accounts (signup / login) — progress is tied to a person, not a link
+- Problem catalog with description, difficulty, and starter code
+- Run against visible test cases; Submit against visible + hidden test cases
+- Per-user, per-problem autosave, so a solution is right where it was left
 
 ---
 
-## 2. Non-Goals (v1)
+## 2. Non-Goals
 
-To keep scope tight, the following are explicitly out of scope for v1 unless you want them added later:
-- User authentication / persistent accounts
-- Video/audio calling (assume interviewer uses Zoom/Meet alongside)
-- Persistent storage of sessions beyond a TTL (e.g., 24–72h)
-- Server-side/native code execution for the general-purpose editor (compiled languages like Java, C++, Go) — only browser-executable languages initially. **Exception:** problem grading (§5.4a) runs Python server-side by design, since hidden test cases can't be shipped to the browser.
-- Recording/playback of the session
+- Interviewer/candidate pairing, shareable session links, or real-time
+  collaborative editing between multiple people
+- Multi-language execution — problems and grading are Python only
+- Video/audio calling, proctoring, or timed sessions
 
 ---
 
 ## 3. High-Level Architecture
 
 ```
-┌──────────────┐        WebSocket (CRDT sync)        ┌──────────────┐
-│  Interviewer │ ───────────────────────────────────► │              │
-│   Browser    │ ◄─────────────────────────────────── │  Sync Server │
-└──────────────┘                                       │ (stateless,  │
-                                                         │  relay only) │
-┌──────────────┐        WebSocket (CRDT sync)          │              │
-│  Candidate   │ ───────────────────────────────────►  └──────┬───────┘
-│   Browser    │ ◄─────────────────────────────────────       │
-└──────────────┘                                       ┌──────▼───────┐
-                                                         │  Redis / KV  │
-                                                         │ (session TTL,│
-                                                         │  presence)   │
-                                                         └──────────────┘
+┌──────────────┐        HTTP (REST, bearer token)     ┌──────────────┐
+│   Browser    │ ───────────────────────────────────► │   FastAPI    │
+│ (TanStack    │ ◄─────────────────────────────────── │   Backend    │
+│  Start/React)│                                       └──────┬───────┘
+└──────────────┘                                              │
+                                                        ┌──────▼───────┐
+                                                        │   SQL DB     │
+                                                        │ (SQLite dev, │
+                                                        │  Postgres)   │
+                                                        └──────────────┘
 ```
 
-**Key architectural decision:** free-form code execution happens entirely client-side (sandboxed iframe/Web Worker/WASM), never on the server. This sidesteps the hardest and most dangerous part of "run arbitrary user code" (container escapes, resource exhaustion, network egress from a server) by never running untrusted code server-side at all.
-
-**Exception — problem grading (§5.4a):** LeetCode-style problems are graded against hidden test cases, which by definition must never reach the browser. That grading step runs the candidate's Python solution server-side, in an isolated subprocess with a hard timeout (`backend/src/backend/executor.py`). This is a deliberate, narrow reversal of the decision above, scoped to the grading endpoints only — the free-form editor execution path is unaffected. See §8 for the sandboxing tradeoffs this implies.
+No realtime layer: every user only ever runs their own code against their
+own account, so there is no sync relay, no CRDT document, and no presence
+model to build. The one place execution is genuinely sensitive is grading —
+hidden test cases must never reach the browser, so `Run`/`Submit` execute
+the candidate's Python in an isolated subprocess with a hard timeout
+(`backend/src/backend/executor.py`), server-side. See §8 for what that
+sandbox does and doesn't protect against.
 
 ---
 
-## 4. Tech Stack (suggested)
+## 4. Tech Stack
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Editor | [CodeMirror 6](https://codemirror.net/) or Monaco | Both support syntax highlighting + collaborative extensions; CM6 is lighter and has first-class Yjs bindings |
-| Real-time sync | [Yjs](https://docs.yjs.dev/) (CRDT) + `y-websocket` or `y-webrtc` | Conflict-free multi-editor sync, works even with concurrent edits, no OT server logic to write |
-| Sync transport | WebSocket server (e.g., `y-websocket` server, or Hocuspocus) | Simple relay; can be stateless/horizontally scaled with Redis pub/sub adapter |
-| Session storage | Redis (TTL-based) | Sessions are ephemeral; no need for a durable DB in v1 |
-| Backend (session creation, link minting) | Node.js (Express/Fastify) or edge functions | Thin — just generates session IDs and serves the WS relay |
-| Code execution (JS/TS) | Web Worker + `iframe sandbox` | Native, fast, secure via origin isolation |
-| Code execution (Python) | [Pyodide](https://pyodide.org/) (WASM CPython) in a Web Worker | Runs fully client-side, no server needed |
-| Code execution (other languages) | WASM runtimes where available (e.g., a WASM-compiled interpreter), else disable "Run" and show "highlighting only" | Avoid server execution entirely per requirement |
-| Hosting | Static frontend (Vercel/Netlify/S3+CDN) + small WS relay service (Fly.io/Render/Railway) | Cheap, scales independently |
+| Editor | [CodeMirror 6](https://codemirror.net/) | Lightweight, good Python syntax highlighting |
+| Backend | FastAPI + SQLAlchemy (Python, managed with [uv](https://docs.astral.sh/uv/)) | Thin REST API over the DB |
+| Auth | Bearer tokens + bcrypt-hashed passwords | Simple, stateless-ish; no session cookies/CSRF to manage |
+| Database | SQLite (dev) / Postgres (prod), via `DATABASE_URL` | Durable storage for accounts, problems, and saved answers |
+| Code execution (grading) | Isolated Python subprocess with a timeout (`backend/src/backend/executor.py`) | Hidden test cases can't be shipped to the browser, so grading must run server-side |
+| Frontend | TanStack Start (React) | File-based routing, SSR shell |
+| Hosting | Single Docker image serving the built frontend from FastAPI | See top-level `README.md` |
 
 ---
 
 ## 5. Feature Specifications
 
-### 5.1 Session Creation & Sharing
-- Interviewer clicks "New Interview" → backend mints a `sessionId` (UUID v4 or short nanoid, e.g., `k3f9-x7q2`)
-- A Yjs document is lazily created in the sync server keyed by `sessionId`
-- Shareable URL: `https://app.example.com/session/{sessionId}`
-- Session TTL: configurable (default 4 hours from creation, extended on activity), after which the Yjs doc and Redis keys are purged
-- No login required to join — anyone with the link can join as a participant
-- Optional: interviewer sets a display name on entry; candidate does too (stored only in-memory/presence, not persisted)
+### 5.1 Accounts
+- `POST /api/auth/signup` — creates a user (bcrypt-hashed password) and
+  immediately issues a bearer token, no separate login step needed
+- `POST /api/auth/login` — issues a new bearer token for existing credentials
+- `POST /api/auth/logout` — invalidates the current token
+- `GET /api/auth/me` — resolves the current user from the `Authorization:
+  Bearer <token>` header; used by the frontend to decide whether to show the
+  login form or the workspace
+- Tokens do not expire on their own — they're valid until `logout` deletes
+  them. There is currently no token rotation or multi-device revocation.
 
-### 5.2 Real-Time Collaborative Editing
-- All connected clients can edit the same document (no read-only mode in v1 — "everyone who connects can edit" per requirement)
-- CRDT (Yjs) guarantees eventual consistency without a central conflict-resolution server
-- **Presence features:**
-  - Colored multi-cursor + selection highlighting per user (via `y-protocols/awareness`)
-  - Small avatar/name tag list showing who's connected
-  - Live "typing" indicator optional
-- **Reconnection handling:** client buffers local edits and Yjs merges automatically on reconnect — no data loss on brief network drops
+### 5.2 Problem Catalog
+- `GET /api/problems` returns every problem's id, title, difficulty,
+  description, function name, starter code (`prototype`), and *visible*
+  test cases only
+- Hidden test cases are never serialized anywhere in this response — they
+  live in a separate column (`ProblemRecord.hidden_tests`) that only the
+  grading endpoints read
 
-### 5.3 Syntax Highlighting
-- Language selector dropdown in the UI (JavaScript, TypeScript, Python, Java, C++, Go, SQL, HTML/CSS, Markdown, plain text — extensible list)
-- Changing the language is itself a synced state (stored as a shared Yjs field, e.g., `ydoc.getMap('meta').get('language')`) so all participants see the same highlighting mode
-- Implemented via CodeMirror 6 language packages (`@codemirror/lang-javascript`, `@codemirror/lang-python`, etc.), loaded on demand to keep bundle size down
-
-### 5.4a Problem Grading ("Run" / "Submit" buttons)
-A session starts with **no problem selected** — the editor is blank until the
-interviewer or candidate picks one from the problem list. Selecting a problem
-loads its description and Python function prototype (starter code) into the
-shared document; problem selection is itself synced state, like `language`.
-
-- **Run** grades the candidate's code against the problem's *visible* test
-  cases only. Per-test input, expected output, and actual output/error are
-  shown, so the candidate can debug.
-- **Submit** grades against visible *and* hidden test cases. Visible results
-  show the same detail as `Run`; hidden results are reduced to pass/fail
-  (+ error message) — their input and expected output are never sent to the
-  client, so they stay meaningfully hidden.
-- **Execution model:** unlike §5.4 below, grading is **server-side**, since
-  hidden tests can't be shipped to the browser without ceasing to be hidden.
-  The backend runs the candidate's function in an isolated subprocess with a
-  hard timeout (`backend/src/backend/executor.py`) — see §8 for what this
-  sandbox does and doesn't protect against.
-- **Language:** Python only for v1. The general multi-language editor (§5.3)
-  still exists for free-form use, but problems, prototypes, and grading are
+### 5.3 Problem Grading (`Run` / `Submit`)
+- **Run** (`POST /api/problems/:id/run`) grades the user's code against the
+  problem's *visible* test cases only. Per-test input, expected output, and
+  actual output/error (plus captured stdout) are returned, so the user can
+  debug.
+- **Submit** (`POST /api/problems/:id/submit`) grades against visible *and*
+  hidden test cases. Visible results show the same detail as `Run`; hidden
+  results are reduced to pass/fail (+ error message) — their input and
+  expected output are never sent to the client.
+- **Execution model:** the backend runs the user's function in an isolated
+  subprocess with a hard timeout — see §8 for the sandboxing tradeoffs.
+- **Language:** Python only. Problems, starter code, and grading are all
   Python-specific.
-- **Broadcasting results (optional, recommended):** after a run/submit, the
-  result can be sent as an ephemeral (non-persisted) awareness/broadcast
-  message so the interviewer sees the candidate's outcome too, without it
-  being part of the durable document.
 
-### 5.4 In-Browser Code Execution (general-purpose editor)
-- Execution is **client-side only**, triggered locally by whichever user runs the code — the *code* is synced via CRDT, but the *execution* and its output are local to that user's browser
-- **Sandboxing model:**
-  - JS/TS: run inside a sandboxed `<iframe sandbox="allow-scripts">` with no `allow-same-origin`, so it cannot access the parent page, cookies, or localStorage; communicate via `postMessage`
-  - Additionally run inside a Web Worker within that iframe for CPU isolation and the ability to terminate on infinite loops (`worker.terminate()` after a timeout, e.g., 5s)
-  - Python: Pyodide loaded in a Web Worker (same timeout/termination strategy)
-  - Console output (`console.log`, `print`, stdout/stderr) captured and piped back to the UI's output panel
-- **Resource limits:** execution timeout (default 5–10s), max output buffer size (e.g., 1MB, truncate beyond that) to prevent runaway output from freezing the UI
-- **No network access** from within the sandbox (enforced by CSP + iframe sandbox attributes) — prevents candidates' code from exfiltrating data or calling external APIs
-- Not currently wired into the UI (§9 removed the language selector in favor of the Python-only problem-grading flow above); kept here as the documented fallback if free-form multi-language execution comes back.
+### 5.4 Saved Answers
+- `GET /api/answers/:problemId` returns the current user's last-saved code
+  for that problem (404 if nothing's been saved yet)
+- `PUT /api/answers/:problemId` upserts it
+- The frontend autosaves on edit, debounced 800ms, scoped per user per
+  problem (`ProblemAnswerRecord`, primary key `(user_id, problem_id)`) — two
+  users working the same problem never see each other's code
 
-### 5.5 Results / Output Panel
-- Split view: editor (left/top) + results panel (right/bottom)
-- For problem grading: one row per test case (pass/fail badge, input/expected/actual for visible tests, pass/fail only for hidden tests), plus a summary count (`X / Y passed`)
-- Each "Run" or "Submit" replaces the previous results
+### 5.5 Results Panel
+- Split view: editor (left) + results panel (right)
+- One row per test case (pass/fail badge, input/expected/actual for visible
+  tests, pass/fail only for hidden tests), plus a summary count
+  (`X / Y passed`)
+- Each `Run` or `Submit` replaces the previous results
 
 ---
 
 ## 6. Data Model
 
-**Yjs document structure per session:**
-```
-YDoc
-├── ytext: "code"           → shared text content of the editor
-├── ymap: "meta"
-│   ├── "language"          → e.g. "python"
-│   ├── "createdAt"         → ISO timestamp
-│   └── "title"             → optional session label
-└── awareness (ephemeral, not persisted)
-    ├── clientId → { name, color, cursor, selection }
-```
-
-**Redis keys (session registry, not the CRDT content itself):**
-```
-session:{sessionId}:createdAt   → timestamp (for TTL/cleanup)
-session:{sessionId}:lastActive  → timestamp (for TTL extension)
-```
+| Table | Key columns |
+|---|---|
+| `users` | `id`, `username` (unique), `password_hash`, `created_at` |
+| `auth_tokens` | `token` (PK), `user_id`, `created_at` |
+| `problems` | `id` (PK), `order_index`, `title`, `difficulty`, `description`, `function_name`, `prototype`, `visible_tests` (JSON), `hidden_tests` (JSON) |
+| `problem_answers` | `(user_id, problem_id)` (composite PK), `code`, `updated_at` |
 
 ---
 
-## 7. API / Protocol Surface
+## 7. API Surface
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/sessions` | `POST` | Create a new session, returns `{ sessionId, url }` |
-| `/api/sessions/:id` | `GET` | Validate session exists / not expired (for a friendly "link expired" page) |
-| `/api/problems` | `GET` | List problems (description, prototype, visible tests only — no hidden tests) |
+| `/api/auth/signup` | `POST` | Create an account, returns a bearer token |
+| `/api/auth/login` | `POST` | Exchange credentials for a bearer token |
+| `/api/auth/logout` | `POST` | Invalidate the current token |
+| `/api/auth/me` | `GET` | Resolve the current user from the bearer token |
+| `/api/problems` | `GET` | List problems (visible tests only, no hidden tests) |
 | `/api/problems/:id/run` | `POST` | Grade code against visible test cases |
-| `/api/problems/:id/submit` | `POST` | Grade code against visible + hidden test cases, server-side |
-| `wss://.../sync/:sessionId` | WebSocket | Yjs sync protocol (binary), handles document updates + awareness |
+| `/api/problems/:id/submit` | `POST` | Grade code against visible + hidden test cases |
+| `/api/answers/:problemId` | `GET` | Fetch the current user's saved code for a problem |
+| `/api/answers/:problemId` | `PUT` | Save the current user's code for a problem |
+
+All endpoints except `/api/auth/signup` and `/api/auth/login` require an
+`Authorization: Bearer <token>` header.
 
 ---
 
@@ -170,42 +149,17 @@ session:{sessionId}:lastActive  → timestamp (for TTL extension)
 
 | Concern | Mitigation |
 |---|---|
-| Malicious code trying to break out of sandbox | `iframe sandbox` with no `allow-same-origin` + Worker isolation; strict CSP on the sandbox origin |
-| Infinite loops / resource exhaustion | Execution timeout + `worker.terminate()`; consider running sandbox on a separate subdomain to limit blast radius |
-| XSS via injected code rendered as HTML | Never `eval` or render output as HTML; output panel renders as text only (escape all content) |
-| Session link guessing | Use unguessable IDs (122-bit UUID or nanoid with sufficient entropy), not sequential IDs |
-| Data leakage after interview | TTL-based auto-expiry and deletion of both Redis keys and the Yjs doc from memory/storage |
-| Abuse (someone spamming session creation) | Rate-limit `/api/sessions` per IP |
-| Cross-tenant document access | `sessionId` acts as the sole authorization token — treat it as a secret; don't log full URLs server-side |
-| Malicious code in problem grading (`/run`, `/submit`) breaking out of the server process | Candidate code runs in its own OS subprocess (never in-process), with a hard timeout. **Current gap:** no container/seccomp/network isolation on the subprocess yet — a determined candidate could still read/write the local filesystem or reach the network from within it. Treat this as prototype-grade isolation; harden with a container (gVisor/Firecracker) or `resource`-based rlimits + network namespace before running untrusted code from strangers in production |
-| Hidden test cases leaking to the client | `/api/problems` and `/run` only ever serialize `visibleTests`; hidden tests live in a separate server-side-only store (`ProblemStore._hidden_tests`) and `/submit` strips input/expected/actual from hidden results before responding |
+| Password storage | bcrypt, per-password salt |
+| Credential stuffing / token guessing | Tokens are 32 bytes of `secrets.token_urlsafe` entropy, not guessable |
+| Malicious code in problem grading (`/run`, `/submit`) breaking out of the server process | Candidate code runs in its own OS subprocess (never in-process), with a hard timeout. **Current gap:** no container/seccomp/network isolation on the subprocess yet — a determined user could still read/write the local filesystem or reach the network from within it. Treat this as prototype-grade isolation; harden with a container (gVisor/Firecracker) or `resource`-based rlimits + network namespace before running untrusted code at scale |
+| Hidden test cases leaking to the client | `/api/problems` and `/run` only ever serialize `visibleTests`; hidden tests live in a separate DB column and `/submit` strips input/expected/actual from hidden results before responding |
+| Cross-user data access | Every answers/problems query is scoped by the authenticated user's id — there is no way to read another user's saved code |
 
 ---
 
 ## 9. Non-Functional Requirements
 
-- **Latency:** edit propagation to other participants < 150ms on typical connections (CRDT sync over WebSocket is well within this)
-- **Scalability:** sync server should be horizontally scalable; use Redis pub/sub or a dedicated CRDT backend (e.g., Hocuspocus with Redis extension) if running multiple WS server instances
-- **Availability:** target 99.5%+ during business hours; graceful reconnect UX on the client (toast: "Reconnecting…")
-- **Browser support:** latest 2 versions of Chrome, Firefox, Safari, Edge (WASM + Web Worker support required for Python execution)
-- **Accessibility:** keyboard-navigable UI, sufficient color contrast for cursor/presence colors
-
----
-
-## 10. Suggested Build Phases
-
-1. **Phase 1 — Core collaboration:** session creation, Yjs + CodeMirror integration, real-time text sync, presence cursors
-2. **Phase 2 — Syntax highlighting:** language selector synced across clients, CodeMirror language packs
-3. **Phase 3 — Safe execution:** sandboxed JS execution (iframe + Worker), output panel
-4. **Phase 4 — Python support:** Pyodide integration, loading-state UX (Pyodide bundle is ~10MB, needs a spinner)
-5. **Phase 5 — Polish:** session expiry UX, rate limiting, reconnect handling, additional languages
-
----
-
-## 11. Open Questions to Resolve Before Build
-
-- Should output be broadcast to all participants, or stay local to whoever clicked Run?
-- Do we need a read-only "observer" role for additional interviewers watching silently, or is fully-open editing acceptable long-term (spec currently says everyone can edit)?
-- ~~Which languages must support **execution** (not just highlighting) at launch — just JS + Python, or more?~~ Resolved: Python only, via server-side problem grading (§5.4a). Other languages remain highlight-only until the general-purpose execution path (§5.4) is wired into the UI again.
-- Session TTL default — 4 hours? 24 hours? Configurable per session?
-- The problem-grading sandbox (§8) is process-isolation-only, with no container/network hardening — is that acceptable to ship, or does it block launch?
+- **Browser support:** latest 2 versions of Chrome, Firefox, Safari, Edge
+- **Accessibility:** keyboard-navigable UI, sufficient color contrast
+- **Persistence:** all state (accounts, saved answers) is durable in the SQL
+  database — nothing is TTL'd or purged

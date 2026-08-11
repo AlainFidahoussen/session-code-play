@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Play, Send, Trash2, Copy, Check, X, Radio, Users, Clock, BookOpen } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Play, Send, Trash2, Check, X, BookOpen, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -18,12 +16,10 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { CodeEditor } from "@/components/CodeEditor";
-import { useCollabSession, type BroadcastOutput } from "@/lib/collab";
-import { LANGUAGES, type LangId } from "@/lib/languages";
+import { useAuth } from "@/lib/auth";
 import {
-  sessionApi,
   problemsApi,
-  type SessionMeta,
+  answersApi,
   type Problem,
   type RunResult,
   type SubmitResult,
@@ -31,35 +27,25 @@ import {
   type HiddenTestResult,
 } from "@/services";
 
+const ANSWER_SAVE_DEBOUNCE_MS = 800;
+
 const NO_PROBLEM_CODE = "# Select a problem above to get started.\n";
 
 type ResultState = { kind: "run"; result: RunResult } | { kind: "submit"; result: SubmitResult };
 
-export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: string }) {
-  const collab = useCollabSession({
-    sessionId: meta.sessionId,
-    name,
-    initialCode: NO_PROBLEM_CODE,
-    initialLanguage: meta.language,
-  });
+export function Workspace() {
+  const { username, logout } = useAuth();
 
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [problemId, setProblemId] = useState<string | null>(null);
+  const [code, setCode] = useState(NO_PROBLEM_CODE);
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [resultState, setResultState] = useState<ResultState | null>(null);
-  const [shareOutput, setShareOutput] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [problems, setProblems] = useState<Problem[]>([]);
   const outRef = useRef<HTMLDivElement>(null);
 
-  const participants = [collab.self, ...collab.peers];
-  const selectedProblem = problems.find((p) => p.id === collab.problemId) ?? null;
+  const selectedProblem = problems.find((p) => p.id === problemId) ?? null;
   const busy = running || submitting;
-
-  useEffect(() => {
-    sessionApi.touchSession(meta.sessionId);
-    const id = setInterval(() => sessionApi.touchSession(meta.sessionId), 30_000);
-    return () => clearInterval(id);
-  }, [meta.sessionId]);
 
   useEffect(() => {
     void problemsApi.listProblems().then(setProblems);
@@ -69,51 +55,45 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
     outRef.current?.scrollTo({ top: outRef.current.scrollHeight });
   }, [resultState]);
 
-  // Remote run/submit results arriving over the ephemeral broadcast channel.
+  // Autosave the current user's code for the selected problem, debounced.
   useEffect(() => {
-    const r = collab.remoteOutput as BroadcastOutput | null;
-    if (!r) return;
-    setResultState({ kind: r.kind, result: r.result } as ResultState);
-  }, [collab.remoteOutput]);
+    if (!problemId) return;
+    const id = problemId;
+    const timer = setTimeout(() => {
+      void answersApi.saveAnswer(id, code);
+    }, ANSWER_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [problemId, code]);
 
-  function handleSelectProblem(id: string) {
+  async function handleSelectProblem(id: string) {
     const problem = problems.find((p) => p.id === id);
-    collab.setProblemId(id);
-    if (problem) collab.setCode(problem.prototype);
+    setProblemId(id);
     setResultState(null);
+    const saved = await answersApi.getAnswer(id);
+    setCode(saved?.code ?? problem?.prototype ?? NO_PROBLEM_CODE);
   }
 
   async function handleRun() {
-    if (!collab.problemId || busy) return;
+    if (!problemId || busy) return;
     setRunning(true);
     try {
-      const result = await problemsApi.runTests(collab.problemId, collab.code);
+      const result = await problemsApi.runTests(problemId, code);
       setResultState({ kind: "run", result });
-      if (shareOutput) collab.broadcastOutput({ kind: "run", result });
     } finally {
       setRunning(false);
     }
   }
 
   async function handleSubmit() {
-    if (!collab.problemId || busy) return;
+    if (!problemId || busy) return;
     setSubmitting(true);
     try {
-      const result = await problemsApi.submitTests(collab.problemId, collab.code);
+      const result = await problemsApi.submitTests(problemId, code);
       setResultState({ kind: "submit", result });
-      if (shareOutput) collab.broadcastOutput({ kind: "submit", result });
     } finally {
       setSubmitting(false);
     }
   }
-
-  async function copyLink() {
-    await navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-  }
-
-  const expiry = useMemo(() => sessionApi.expiresAt(meta), [meta]);
 
   const visibleResults: VisibleTestResult[] =
     resultState?.kind === "run" ? resultState.result.results : (resultState?.result.visible ?? []);
@@ -129,69 +109,20 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
   return (
     <div className="flex h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-primary">cohort</span>
-          <span className="truncate text-sm text-muted-foreground">{meta.title}</span>
-        </div>
-
-        <span
-          className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 font-mono text-[11px]"
-          title={`Sync status: ${collab.status}`}
-        >
-          <Radio
-            className={
-              collab.status === "connected"
-                ? "size-3 text-[color:var(--color-success)]"
-                : "size-3 animate-pulse text-[color:var(--color-warning)]"
-            }
-          />
-          {collab.status === "connected" ? "Live" : "Reconnecting…"}
-        </span>
-
-        <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-          <Clock className="size-3" />
-          expires {expiry.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        <span className="font-mono text-sm font-semibold text-primary">cohort</span>
 
         <div className="ml-auto flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <Users className="size-3.5 text-muted-foreground" />
-            <div className="flex -space-x-1.5">
-              {participants.map((p) => (
-                <span
-                  key={p.clientId}
-                  title={p.name}
-                  className="grid size-6 place-items-center rounded-full border border-background text-[10px] font-semibold"
-                  style={{ backgroundColor: p.color, color: "#12161f" }}
-                >
-                  {p.name.slice(0, 2).toUpperCase()}
-                </span>
-              ))}
-            </div>
-          </div>
+          <span className="font-mono text-xs text-muted-foreground">{username}</span>
 
-          <span
-            className="flex h-8 w-[150px] items-center justify-center rounded-md border border-border bg-surface-2 font-mono text-xs text-muted-foreground"
-            title="Session language is fixed at creation"
-          >
-            {LANGUAGES.find((l) => l.id === collab.language)?.label ?? collab.language}
-          </span>
-
-          <Button variant="secondary" size="sm" onClick={copyLink}>
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            {copied ? "Copied" : "Invite"}
-          </Button>
-
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={handleRun}
-            disabled={!collab.problemId || busy}
-          >
+          <Button size="sm" variant="secondary" onClick={handleRun} disabled={!problemId || busy}>
             <Play className="size-3.5" /> {running ? "Running…" : "Run"}
           </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={!collab.problemId || busy}>
+          <Button size="sm" onClick={handleSubmit} disabled={!problemId || busy}>
             <Send className="size-3.5" /> {submitting ? "Submitting…" : "Submit"}
+          </Button>
+
+          <Button variant="ghost" size="sm" onClick={logout} title="Log out">
+            <LogOut className="size-3.5" />
           </Button>
         </div>
       </header>
@@ -199,7 +130,7 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
       <div className="border-b border-border bg-surface">
         <div className="flex items-center gap-2 px-4 py-2">
           <BookOpen className="size-3.5 text-muted-foreground" />
-          <Select value={collab.problemId ?? ""} onValueChange={handleSelectProblem}>
+          <Select value={problemId ?? ""} onValueChange={handleSelectProblem}>
             <SelectTrigger className="h-8 w-[240px] bg-surface-2 font-mono text-xs">
               <SelectValue placeholder="Select a problem…" />
             </SelectTrigger>
@@ -234,13 +165,7 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1.6fr_1fr]">
         <section className="min-h-0 border-b border-border lg:border-b-0 lg:border-r">
-          <CodeEditor
-            value={collab.code}
-            language={collab.language as LangId}
-            peers={collab.peers}
-            onChange={collab.setCode}
-            onCursor={collab.setCursor}
-          />
+          <CodeEditor value={code} language="python" onChange={setCode} />
         </section>
 
         <section className="flex min-h-0 flex-col bg-surface">
@@ -259,24 +184,21 @@ export function SessionWorkspace({ meta, name }: { meta: SessionMeta; name: stri
                 {passedCount} / {totalCount} passed
               </span>
             )}
-            <div className="ml-auto flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <Switch id="share" checked={shareOutput} onCheckedChange={setShareOutput} />
-                <Label htmlFor="share" className="font-mono text-[11px] text-muted-foreground">
-                  share results
-                </Label>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setResultState(null)}>
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setResultState(null)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
           </div>
 
           <div ref={outRef} className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs">
-            {!collab.problemId && (
+            {!problemId && (
               <p className="text-muted-foreground">Select a problem to run or submit code.</p>
             )}
-            {collab.problemId && !resultState && !busy && (
+            {problemId && !resultState && !busy && (
               <p className="text-muted-foreground">
                 Run checks your code against the visible tests below. Submit also grades it against
                 hidden tests.
